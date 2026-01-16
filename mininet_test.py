@@ -39,7 +39,7 @@ def run():
         # 清除默认路由，迫使必须通过 OLSR 发现路由
         h.cmd('ip route flush table main')
         # 重新把直连路由加回去（否则连邻居都找不到）
-        h.cmd('ip route add 10.0.0.0/24 dev %s-eth0' % h.name)
+        # h.cmd('ip route add 10.0.0.0/24 dev %s-eth0' % h.name)
 
     # --- 2. 启动你的 OLSR 程序 ---
     project_path = "/home/admin/overlay_OLSR_mininet/src" # 修改为你的实际路径
