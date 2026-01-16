@@ -42,25 +42,23 @@ def run():
         h.cmd('ip route add 10.0.0.0/24 dev %s-eth0' % h.name)
 
     # --- 2. 启动你的 OLSR 程序 ---
-    project_path = "/home/user/olsr_project" # 修改为你的实际路径
+    project_path = "~/overlay_OLSR_mininet/src" # 修改为你的实际路径
     olsr_script = "olsr_main.py"
     
     info('*** Starting OLSR protocol on all hosts...\n')
     for h in net.hosts:
-        # 获取接口名 (如 h1-eth0)
-        intf = h.defaultIntf().name
+        # 【修改点 1】不再获取接口名，而是获取 IP
+        # h.IP() 会返回 Mininet 分配给该主机的 IP (如 10.0.0.1)
+        host_ip = h.IP()
         
-        # 构造命令：
-        # 1. 切换到项目目录
-        # 2. 运行 Python 脚本
-        # 3. 传入接口参数 (假设你的程序接受 --intf)
-        # 4. 重定向日志 (非常重要！)
-        # 5. 后台运行 (&)
+        # 【修改点 2】构造命令
+        # 直接传入 IP 地址，匹配 olsr_main.py 的 sys.argv[1]
         cmd = (
             f"cd {project_path} && "
-            f"python3 {olsr_script} --intf {intf} "
-            f"> {project_path}/logs/{h.name}.log 2>&1 &"
+            f"python3 {olsr_script} {host_ip} "
+            f"> {project_path}/../logs/{h.name}.log 2>&1 &"
         )
+        # 注意：日志路径建议放到 src 上一层，或者确保 logs 文件夹存在
         
         info(f'*** {h.name} executing: {cmd}\n')
         h.cmd(cmd)
