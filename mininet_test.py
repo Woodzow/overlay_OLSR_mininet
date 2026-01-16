@@ -42,7 +42,7 @@ def run():
         h.cmd('ip route add 10.0.0.0/24 dev %s-eth0' % h.name)
 
     # --- 2. 启动你的 OLSR 程序 ---
-    project_path = "~/overlay_OLSR_mininet/src" # 修改为你的实际路径
+    project_path = "/home/admin/overlay_OLSR_mininet/src" # 修改为你的实际路径
     olsr_script = "olsr_main.py"
     
     info('*** Starting OLSR protocol on all hosts...\n')

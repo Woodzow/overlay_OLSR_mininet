@@ -1,6 +1,7 @@
 '''
 本文件为运行olsr应用层覆盖网络的主程序入口
 '''
+import os
 import time
 import socket
 import struct
@@ -250,10 +251,41 @@ class OLSRNode:
         print(f"[Forward] 转发来自 {orig_ip} 的消息")
         self.send_packet(new_head + msg_data[12:])
 
+    # 替换原来的 send_packet 方法
     def send_packet(self, msg_bytes):
-        """封装包头并广播"""
+        """封装包头并在所有接口上广播"""
         pkt_head = create_packet_header(len(msg_bytes), self.get_next_pkt_seq())
-        self.sock.sendto(pkt_head + msg_bytes, ('<broadcast>', self.port))
+        data = pkt_head + msg_bytes
+        
+        # 1. 获取所有接口
+        interfaces = self.get_interfaces()
+        if not interfaces:
+            # 如果没找到特定接口，尝试默认发送
+            try:
+                self.sock.sendto(data, ('255.255.255.255', self.port))
+            except:
+                pass
+            return
+
+        # 2. 遍历接口逐个发送
+        for intf in interfaces:
+            try:
+                # 创建一个临时 Socket 用于发送
+                # 必须每次创建，因为 bind device 是一次性的
+                send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                
+                # 【关键】绑定到特定设备 (Requires root, Mininet has root)
+                # Python 3 中 setsockopt 25 号参数对应 SO_BINDTODEVICE
+                # 接口名必须转为 bytes
+                send_sock.setsockopt(socket.SOL_SOCKET, 25, intf.encode('utf-8'))
+                
+                # 发送到广播地址
+                send_sock.sendto(data, ('255.255.255.255', self.port))
+                send_sock.close()
+            except Exception as e:
+                # print(f"[Send Error] on {intf}: {e}")
+                pass
 
     # ==========================
     # 辅助与循环
@@ -295,6 +327,20 @@ class OLSRNode:
                 self.neighbor_manager.cleanup()
                 self.topology_manager.cleanup()
                 self.duplicate_set.cleanup()
+    # 在 OLSRNode 类内部添加
+    def get_interfaces(self):
+        """获取所有 eth 开头的网络接口名称"""
+        interfaces = []
+        try:
+            # 遍历 /sys/class/net 目录查找接口
+            for intf in os.listdir('/sys/class/net/'):
+                if intf.startswith('h') and 'eth' in intf: # 匹配 Mininet 的 hX-ethY
+                    interfaces.append(intf)
+                elif intf.startswith('eth'): # 匹配普通 Linux 的 ethY
+                    interfaces.append(intf)
+        except Exception:
+            pass
+        return interfaces   
 
 if __name__ == "__main__":
     import sys

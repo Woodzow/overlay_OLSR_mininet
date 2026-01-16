@@ -1,7 +1,7 @@
 import heapq #导入堆排序包，用于实现优先队列
 from typing import Dict, List, Tuple, Any #导入提示变量类型的包，主要还是为了方便阅读代码
-import networkx as nx
-import matplotlib.pyplot as plt
+#import networkx as nx
+#import matplotlib.pyplot as plt
 INF = float('inf')
 def dijkstra(graph: Dict[Any, List[Tuple[Any, float]]], source: Any):  #创建dijkstra算法求解函数，输入为图和源节点；其中图的表示方法为邻接表
     dist = {node: INF for node in graph} #利用字典推导式的方法初始化到各个节点的距离字典值权重为无穷大
