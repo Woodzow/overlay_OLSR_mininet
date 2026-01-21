@@ -1,10 +1,11 @@
+import time
+
 from mininet.cli import CLI
 from mininet.link import TCLink
 from mininet.log import info, setLogLevel
 from mininet.net import Mininet
 from mininet.topo import Topo
 
-import time
 
 # --- 1. 定义一个简单的多跳拓扑 ---
 class MeshTopo(Topo):
@@ -57,11 +58,13 @@ def run():
         # 必须显式告诉 h2 和 h3：去往右边的邻居，要走 eth1，别走 eth0
         if h.name == "h2":
             # 告诉 h2: 去找 h5 (10.0.0.5) 请走 eth1
-            h.cmd("ip route add 10.0.0.5 dev h2-eth1")
+            h.cmd("ip route add 10.0.0.4 dev h2-eth1")
+            h.cmd("ip route add 10.0.0.5 dev h2-eth2")
 
         if h.name == "h3":
             # 告诉 h3: 去找 h6 (10.0.0.6) 请走 eth1
             h.cmd("ip route add 10.0.0.6 dev h3-eth1")
+            h.cmd("ip route add 10.0.0.7 dev h3-eth2")
 
     # --- 2. 启动你的 OLSR 程序 ---
     project_path = "/home/admin/overlay_OLSR_mininet/src"  # 修改为你的实际路径
@@ -86,7 +89,6 @@ def run():
         h.cmd(cmd)
 
     info("*** Waiting 10 seconds for OLSR convergence...\n")
-
 
     time.sleep(10)
 
