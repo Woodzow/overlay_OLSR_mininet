@@ -14,12 +14,18 @@ class MeshTopo(Topo):
         h2 = self.addHost("h2", ip="10.0.0.2/24")
         h3 = self.addHost("h3", ip="10.0.0.3/24")
         h4 = self.addHost("h4", ip="10.0.0.4/24")
+        h5 = self.addHost("h5", ip="10.0.0.5/24")
+        h6 = self.addHost("h6", ip="10.0.0.6/24")
+        h7 = self.addHost("h7", ip="10.0.0.7/24")
 
         # 创建链路，模拟线性/多跳结构：h1-h2-h3-h4
         # 这样 h1 ping h4 必须经过路由
         self.addLink(h1, h2, bw=10, delay="5ms", loss=0)
-        self.addLink(h2, h3, bw=10, delay="5ms", loss=0)
-        self.addLink(h3, h4, bw=10, delay="5ms", loss=0)
+        self.addLink(h1, h3, bw=10, delay="5ms", loss=0)
+        self.addLink(h2, h4, bw=10, delay="5ms", loss=0)
+        self.addLink(h2, h5, bw=10, delay="5ms", loss=0)
+        self.addLink(h3, h6, bw=10, delay="5ms", loss=0)
+        self.addLink(h3, h7, bw=10, delay="5ms", loss=0)
 
         # 如果你想测试更复杂的网状（Mesh），可以加一条斜线：
         # self.addLink(h2, h4)
@@ -44,14 +50,18 @@ def run():
         # 首先配置不管怎么都走eth0， 再在后面加入特例（多个邻居连接）
         h.cmd("ip route add 10.0.0.0/24 dev %s-eth0" % h.name)
 
+        if h.name == "h1":
+            # 告诉 h1: 去找 h3 (10.0.0.3) 请走 eth1
+            h.cmd("ip route add 10.0.0.3 dev h1-eth1")
+
         # 必须显式告诉 h2 和 h3：去往右边的邻居，要走 eth1，别走 eth0
         if h.name == "h2":
-            # 告诉 h2: 去找 h3 (10.0.0.3) 请走 eth1
-            h.cmd("ip route add 10.0.0.3 dev h2-eth1")
+            # 告诉 h2: 去找 h5 (10.0.0.5) 请走 eth1
+            h.cmd("ip route add 10.0.0.5 dev h2-eth1")
 
         if h.name == "h3":
-            # 告诉 h3: 去找 h4 (10.0.0.4) 请走 eth1
-            h.cmd("ip route add 10.0.0.4 dev h3-eth1")
+            # 告诉 h3: 去找 h6 (10.0.0.6) 请走 eth1
+            h.cmd("ip route add 10.0.0.6 dev h3-eth1")
 
     # --- 2. 启动你的 OLSR 程序 ---
     project_path = "/home/admin/overlay_OLSR_mininet/src"  # 修改为你的实际路径
@@ -84,7 +94,7 @@ def run():
     info("*** Checking Routing Tables on h1 and h4...\n")
     # 查看 h1 是否学习到了 h4 的路由
     print(net["h1"].cmd("ip route"))
-    print(net["h4"].cmd("ip route"))
+    print(net["h7"].cmd("ip route"))
 
     info("*** Running CLI for manual testing...\n")
     CLI(net)
