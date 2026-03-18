@@ -90,6 +90,7 @@ class OLSRNode:
         # 1. 解析包头
         pkt_len, pkt_seq = struct.unpack('!HH', data[:4])
         cursor = 4
+        if pkt_len != len(data) - 4: return  # 包长度不匹配，丢弃
         
 
         # 2. 遍历消息
@@ -102,6 +103,8 @@ class OLSRNode:
                 msg_type, vtime, msg_size, orig_bytes, ttl, hop, msg_seq = \
                     struct.unpack('!BBH4sBBH', msg_head)
                 
+                if msg_size < 12: break # 消息体长度不合理，丢弃
+
                 orig_ip = socket.inet_ntoa(orig_bytes) #将字节流的发送者ip转换为字符串形式，这里便是直接获取我自己有哪些可以收到hello消息邻居的
                 
                 # =================【修改点：解码 vtime】=================
