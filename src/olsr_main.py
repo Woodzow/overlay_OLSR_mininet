@@ -332,18 +332,29 @@ class OLSRNode:
                 self.duplicate_set.cleanup()
     # 在 OLSRNode 类内部添加
     def get_interfaces(self):
-        """获取所有 eth 开头的网络接口名称"""
+        """获取当前节点内可用于广播 OLSR 消息的接口名称"""
         interfaces = []
         try:
-            # 遍历 /sys/class/net 目录查找接口
             for intf in os.listdir('/sys/class/net/'):
-                if intf.startswith('h') and 'eth' in intf: # 匹配 Mininet 的 hX-ethY
+                if intf == 'lo':
+                    continue
+
+                # Mininet: hX-ethY
+                if intf.startswith('h') and 'eth' in intf:
                     interfaces.append(intf)
-                elif intf.startswith('eth'): # 匹配普通 Linux 的 ethY
+                    continue
+
+                # Mininet-WiFi: staX-wlanY
+                if intf.startswith('sta') and 'wlan' in intf:
+                    interfaces.append(intf)
+                    continue
+
+                # 普通 Linux 接口
+                if intf.startswith(('eth', 'wlan')):
                     interfaces.append(intf)
         except Exception:
             pass
-        return interfaces   
+        return sorted(set(interfaces))
 
 if __name__ == "__main__":
     import sys
