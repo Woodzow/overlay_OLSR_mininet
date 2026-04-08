@@ -90,7 +90,7 @@ class OLSRNode:
         # 1. 解析包头
         pkt_len, pkt_seq = struct.unpack('!HH', data[:4])
         cursor = 4
-        if pkt_len != len(data) - 4: return  # 包长度不匹配，丢弃
+        if pkt_len != len(data): return  # Packet Length 包含 4 字节包头
         
 
         # 2. 遍历消息
@@ -287,8 +287,7 @@ class OLSRNode:
                 send_sock.sendto(data, ('255.255.255.255', self.port))
                 send_sock.close()
             except Exception as e:
-                # print(f"[Send Error] on {intf}: {e}")
-                pass
+                print(f"[Send Error] on {intf}: {e}")
 
     # ==========================
     # 辅助与循环
