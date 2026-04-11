@@ -23,6 +23,7 @@ except ImportError:
 TOPOLOGY_FILE = Path(__file__).resolve().parents[1] / "configs" / "mininet_wifi_complex_12sta" / "topology.json"
 VIDEO_DATA_PORT = 6200
 BENCH_DATA_PORT = 6300
+BENCH_RESULTS_DIR = Path(__file__).resolve().parents[1] / "logs" / "overlay_bench_results"
 
 
 def load_topology() -> dict:
@@ -46,7 +47,7 @@ def parse_args(topology: dict) -> argparse.Namespace:
     parser.add_argument("--bench-count", type=int, default=1000, help="Number of packets to send in throughput benchmark.")
     parser.add_argument("--bench-payload-size", type=int, default=1000, help="Payload size in bytes per benchmark packet.")
     parser.add_argument("--bench-interval-ms", type=float, default=0.0, help="Inter-packet delay in milliseconds for throughput benchmark.")
-    parser.add_argument("--bench-report-timeout-sec", type=float, default=10.0, help="Timeout waiting for throughput report.")
+    parser.add_argument("--bench-report-timeout-sec", type=float, default=30.0, help="Timeout waiting for the destination throughput result file.")
     return parser.parse_args()
 
 
@@ -128,6 +129,16 @@ def start_overlay_bench_daemon(node, node_ip: str, repo_root: Path, data_port: i
 
 def stop_overlay_bench_daemon(node) -> None:
     node.cmd("pkill -f 'src/overlay_bench.py daemon' >/dev/null 2>&1 || true")
+
+
+def cleanup_overlay_bench_results(repo_root: Path) -> None:
+    results_dir = repo_root / "logs" / "overlay_bench_results"
+    if not results_dir.exists():
+        return
+    for path in results_dir.glob("*.json"):
+        path.unlink()
+    for path in results_dir.glob("*.json.tmp"):
+        path.unlink()
 
 
 def source_ip_of(topology: dict, station_name: str) -> str:
@@ -294,6 +305,11 @@ def automated_bench(
     stations_by_name = {node.name: node for node in stations}
     source_node = stations_by_name[source_name]
 
+    info("*** Cleaning previous overlay_bench daemons and result files\n")
+    for node in stations:
+        stop_overlay_bench_daemon(node)
+    cleanup_overlay_bench_results(repo_root)
+
     info("*** Starting overlay_bench daemons on relay/destination nodes\n")
     for node in stations:
         if node.name == source_name:
@@ -322,6 +338,9 @@ def automated_bench(
     throughput_result = json.loads(run_cmd(source_node, throughput_cmd))
     info("\n=== throughput/loss benchmark ===\n")
     info(json.dumps(throughput_result, ensure_ascii=False, indent=2) + "\n")
+    result_path = throughput_result.get("result_path")
+    if result_path:
+        info(f"throughput_result_file={result_path}\n")
 
 
 def main() -> int:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import errno
 import queue
 import select
 import socket
@@ -20,8 +21,7 @@ DEFAULT_DATA_PORT = 6300
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOCKET_BUFFER_BYTES = 1_048_576
 DEFAULT_END_RETRY_INTERVAL_SEC = 1.0
-DEFAULT_REPORT_RETRY_INTERVAL_SEC = 1.0
-DEFAULT_PREFLIGHT_RETRIES = 3
+DEFAULT_RESULTS_DIR = REPO_ROOT / "logs" / "overlay_bench_results"
 
 
 class Tee:
@@ -60,6 +60,18 @@ class ThroughputSession:
     first_rx_ns: int | None = None
     last_rx_ns: int | None = None
     seen_seqs: set[int] = field(default_factory=set)
+
+
+def session_result_path(dest_ip: str, session_id: str) -> Path:
+    safe_ip = str(dest_ip).replace(".", "_")
+    return DEFAULT_RESULTS_DIR / f"{safe_ip}__{session_id}.json"
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=True, separators=(",", ":")), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 class ControlClient:
@@ -120,8 +132,6 @@ class OverlayBenchNode:
         self._route_cache: dict[str, RouteInfo] = {}
         self._route_lock = threading.Lock()
         self._throughput_sessions: dict[str, ThroughputSession] = {}
-        self._completed_throughput_reports: dict[str, dict[str, Any]] = {}
-        self._completed_report_retry_at: dict[str, float] = {}
         self.send_retry_count = 0
         self.send_retry_events = 0
         self.send_failures = 0
@@ -299,24 +309,22 @@ class OverlayBenchNode:
 
     def handle_throughput_end(self, packet: dict[str, Any]) -> None:
         session_id = str(packet["session_id"])
+        dest_ip = str(packet["dest_ip"])
         src_ip = str(packet["src_ip"])
-        cached_report = self._completed_throughput_reports.get(session_id)
-        if cached_report is not None:
-            self.try_send_completed_report(session_id, cached_report)
-            return
         session = self._throughput_sessions.get(session_id)
         if session is None:
             session = ThroughputSession(session_id=session_id, src_ip=src_ip)
         first_rx_ns = session.first_rx_ns or 0
         last_rx_ns = session.last_rx_ns or first_rx_ns
         duration_ns = max(0, last_rx_ns - first_rx_ns)
-        report = {
+        result = {
             "app": APP_NAME,
             "version": APP_VERSION,
-            "kind": "throughput_report",
-            "src_ip": self.node_ip,
-            "dest_ip": src_ip,
+            "metric": "throughput",
             "session_id": session_id,
+            "src_ip": src_ip,
+            "dest_ip": dest_ip,
+            "receiver_ip": self.node_ip,
             "expected_packets": int(packet["expected_packets"]),
             "expected_bytes": int(packet["expected_bytes"]),
             "received_packets": session.received_packets,
@@ -325,10 +333,9 @@ class OverlayBenchNode:
             "first_rx_ns": first_rx_ns,
             "last_rx_ns": last_rx_ns,
             "duration_ns": duration_ns,
+            "result_written_at_sec": time.time(),
         }
-        self._completed_throughput_reports[session_id] = report
-        self._completed_report_retry_at[session_id] = time.monotonic()
-        self.try_send_completed_report(session_id, report)
+        write_json_atomic(session_result_path(dest_ip, session_id), result)
         self._throughput_sessions.pop(session_id, None)
 
     def handle_throughput_report(self, packet: dict[str, Any]) -> None:
@@ -337,27 +344,7 @@ class OverlayBenchNode:
             self.log(f"unhandled throughput report session_id={session_id}")
 
     def handle_throughput_report_ack(self, packet: dict[str, Any]) -> None:
-        session_id = str(packet.get("session_id", ""))
-        self._completed_throughput_reports.pop(session_id, None)
-        self._completed_report_retry_at.pop(session_id, None)
-
-    def try_send_completed_report(self, session_id: str, report: dict[str, Any]) -> bool:
-        try:
-            self.send_overlay(report)
-            self._completed_report_retry_at[session_id] = time.monotonic() + DEFAULT_REPORT_RETRY_INTERVAL_SEC
-            return True
-        except Exception as exc:
-            self._completed_report_retry_at[session_id] = time.monotonic() + DEFAULT_REPORT_RETRY_INTERVAL_SEC
-            self.log(f"report send retry scheduled session_id={session_id} error={exc}")
-            return False
-
-    def retry_completed_reports(self) -> None:
-        now = time.monotonic()
-        for session_id, report in list(self._completed_throughput_reports.items()):
-            retry_at = self._completed_report_retry_at.get(session_id, now)
-            if retry_at > now:
-                continue
-            self.try_send_completed_report(session_id, report)
+        return
 
     def handle_local(self, packet: dict[str, Any]) -> None:
         kind = str(packet.get("kind", ""))
@@ -397,7 +384,6 @@ class OverlayBenchNode:
     def run(self) -> None:
         self.log(f"benchmark daemon listening on udp/{self.data_port}")
         while not self._stop_event.is_set():
-            self.retry_completed_reports()
             try:
                 readable, _, _ = select.select([self.sock], [], [], 0.5)
             except (OSError, ValueError):
@@ -407,6 +393,9 @@ class OverlayBenchNode:
                     raw, _remote = sock.recvfrom(65535)
                     self.handle_packet(raw)
                 except Exception as exc:
+                    if isinstance(exc, OSError) and getattr(exc, "errno", None) == errno.EBADF:
+                        if self._stop_event.is_set():
+                            return
                     self.log(f"packet handling error: {exc}")
 
 
@@ -447,13 +436,7 @@ def add_common_node_args(parser: argparse.ArgumentParser) -> None:
         "--end-retry-interval-sec",
         type=float,
         default=DEFAULT_END_RETRY_INTERVAL_SEC,
-        help="Retry interval while waiting for throughput_report after sending throughput_end.",
-    )
-    parser.add_argument(
-        "--preflight-retries",
-        type=int,
-        default=DEFAULT_PREFLIGHT_RETRIES,
-        help="Round-trip preflight attempts before throughput test to confirm reverse-path readiness.",
+        help="Retry interval while waiting for the destination result file after sending throughput_end.",
     )
 
 
@@ -593,45 +576,17 @@ def run_latency_command(args: argparse.Namespace) -> int:
         node.close()
 
 
-def run_preflight_roundtrip(node: OverlayBenchNode, dest_ip: str, retries: int, timeout_sec: float) -> dict[str, Any]:
-    last_error: Exception | None = None
-    for _attempt in range(max(1, int(retries))):
-        ping_id = uuid.uuid4().hex
-        reply_queue = node.register_waiter("ping_reply", ping_id)
-        packet = {
-            "app": APP_NAME,
-            "version": APP_VERSION,
-            "kind": "ping",
-            "src_ip": node.node_ip,
-            "dest_ip": dest_ip,
-            "ping_id": ping_id,
-            "send_ts_ns": time.perf_counter_ns(),
-            "payload_size": 8,
-            "payload": "warmup",
-        }
-        try:
-            node.send_overlay(packet)
-            return reply_queue.get(timeout=float(timeout_sec))
-        except Exception as exc:
-            last_error = exc
-        finally:
-            node.pop_waiter("ping_reply", ping_id)
-    raise TimeoutError(f"preflight roundtrip timeout for dest={dest_ip}: {last_error}")
-
-
 def run_throughput_command(args: argparse.Namespace) -> int:
     node = build_node(args)
     try:
         listener = node.start_background()
         route, route_setup_sec = node.establish_route(args.dest_ip)
-        run_preflight_roundtrip(
-            node=node,
-            dest_ip=args.dest_ip,
-            retries=int(args.preflight_retries),
-            timeout_sec=max(1.0, min(float(args.report_timeout_sec), 5.0)),
-        )
         payload_text = "x" * int(args.payload_size)
         session_id = uuid.uuid4().hex
+        result_path = session_result_path(args.dest_ip, session_id)
+        for cleanup_path in (result_path, result_path.with_suffix(result_path.suffix + ".tmp")):
+            if cleanup_path.exists():
+                cleanup_path.unlink()
         send_start_ns = time.perf_counter_ns()
         for seq in range(int(args.count)):
             packet = {
@@ -659,48 +614,36 @@ def run_throughput_command(args: argparse.Namespace) -> int:
             "expected_packets": int(args.count),
             "expected_bytes": int(args.count) * int(args.payload_size),
         }
-        report_queue = node.register_waiter("throughput_report", session_id)
-        report = None
         deadline = time.monotonic() + float(args.report_timeout_sec)
-        try:
-            while time.monotonic() < deadline:
-                node.send_overlay(end_packet)
-                wait_timeout = min(
-                    float(args.end_retry_interval_sec),
-                    max(0.0, deadline - time.monotonic()),
-                )
-                if wait_timeout <= 0:
-                    break
-                try:
-                    report = report_queue.get(timeout=wait_timeout)
-                    break
-                except queue.Empty:
-                    continue
-        finally:
-            node.pop_waiter("throughput_report", session_id)
-        if report is None:
+        result = None
+        while time.monotonic() < deadline:
+            node.send_overlay(end_packet)
+            wait_timeout = min(
+                float(args.end_retry_interval_sec),
+                max(0.0, deadline - time.monotonic()),
+            )
+            time.sleep(wait_timeout)
+            if not result_path.exists():
+                continue
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                break
+            except Exception:
+                continue
+        if result is None:
             raise TimeoutError(
-                f"throughput_report timeout for session={session_id} "
+                f"throughput result timeout for session={session_id} "
                 f"dest={args.dest_ip} after {float(args.report_timeout_sec):.3f}s"
             )
-        ack_packet = {
-            "app": APP_NAME,
-            "version": APP_VERSION,
-            "kind": "throughput_report_ack",
-            "src_ip": args.node_ip,
-            "dest_ip": str(report["src_ip"]),
-            "session_id": session_id,
-        }
-        node.send_overlay(ack_packet)
         node._stop_event.set()
         listener.join(timeout=1.0)
 
         sent_packets = int(args.count)
         sent_bytes = sent_packets * int(args.payload_size)
         sender_duration_sec = max(1e-9, (send_end_ns - send_start_ns) / 1_000_000_000.0)
-        received_packets = int(report["received_packets"])
-        received_bytes = int(report["received_bytes"])
-        receiver_duration_ns = int(report["duration_ns"])
+        received_packets = int(result["received_packets"])
+        received_bytes = int(result["received_bytes"])
+        receiver_duration_ns = int(result["duration_ns"])
         receiver_duration_sec = max(1e-9, receiver_duration_ns / 1_000_000_000.0) if received_packets > 1 else sender_duration_sec
         offered_load_mbps = (sent_bytes * 8.0) / sender_duration_sec / 1_000_000.0
         goodput_mbps = (received_bytes * 8.0) / receiver_duration_sec / 1_000_000.0
@@ -716,7 +659,7 @@ def run_throughput_command(args: argparse.Namespace) -> int:
             "sent_packets": sent_packets,
             "received_packets": received_packets,
             "lost_packets": loss_packets,
-            "duplicate_packets": int(report["duplicate_packets"]),
+            "duplicate_packets": int(result["duplicate_packets"]),
             "pdr": round((received_packets / sent_packets) if sent_packets else 0.0, 6),
             "loss_rate": round(loss_rate, 6),
             "sent_bytes": sent_bytes,
@@ -725,6 +668,8 @@ def run_throughput_command(args: argparse.Namespace) -> int:
             "receiver_duration_sec": round(receiver_duration_sec, 6),
             "offered_load_mbps": round(offered_load_mbps, 6),
             "goodput_mbps": round(goodput_mbps, 6),
+            "receiver_ip": result.get("receiver_ip"),
+            "result_path": str(result_path),
             "send_retry_events": node.send_retry_events,
             "send_retry_count": node.send_retry_count,
             "send_failures": node.send_failures,

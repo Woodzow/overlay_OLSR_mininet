@@ -1,6 +1,6 @@
 # OLSR Overlay Mininet-WiFi Test
 
-本仓库现在补充了基于现有 OLSR 应用层覆盖网络实现的 12 节点 Mininet-WiFi 复杂拓扑、独立视频转发程序，以及路由性能测试程序。
+本仓库补充了基于现有 OLSR 应用层覆盖网络实现的 12 节点 Mininet-WiFi 复杂拓扑、独立视频转发程序，以及路由性能测试程序。
 
 ## 拓扑
 
@@ -30,7 +30,7 @@
 - `src/olsr_main.py`
   增加本地控制面 UDP 端口 `127.0.0.1:5100`，支持 `SHOW_ROUTE`、`SHOW_ROUTE_DETAIL:<ip>`、`SHOW_NEIGHBORS`、`DISCOVER_ROUTE:<ip>`。
 - `src/video_forwarder.py`
-  独立于协议本身的视频/文件逐跳转发程序。它不会嵌入协议，只查询 OLSR 当前路由表得到下一跳后转发。
+  独立于协议本身的视频/文件逐跳转发程序。它不嵌入协议，只查询 OLSR 当前路由表得到下一跳后转发。
 - `src/overlay_bench.py`
   用于测试首次路由收敛时间、吞吐量、丢包率，也保留了时延测试能力。
 - `src/resource_bench.py`
@@ -43,21 +43,21 @@ cd /home/admin/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --cli --skip-file-transfer
 ```
 
-如果要自动执行一次视频文件传输：
+自动执行一次视频文件传输：
 
 ```bash
 cd /home/admin/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --video-file data.mp4 --cli
 ```
 
-如果要在启动后自动执行一次路由收敛与吞吐量/丢包率测试：
+自动执行一次路由收敛与吞吐量/丢包率测试：
 
 ```bash
 cd /home/admin/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer --cli
 ```
 
-如果要人为注入链路丢包，例如 5%：
+注入链路丢包，例如 5%：
 
 ```bash
 cd /home/admin/overlay_OLSR_mininet
@@ -66,13 +66,11 @@ sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfe
 
 ## Mininet-WiFi CLI 常用测试命令
 
-进入 CLI 后，可先查看站点：
-
 ```bash
 nodes
 ```
 
-查看某个节点当前 OLSR 路由表：
+查看路由表：
 
 ```bash
 sta1 python3 -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(3); s.sendto(b'SHOW_ROUTE',('127.0.0.1',5100)); print(s.recvfrom(8192)[0].decode())"
@@ -108,7 +106,7 @@ sta11 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_fo
 sta12 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.12 --data-port 6200 --output-dir logs/received_videos &
 ```
 
-然后在源节点发送：
+源节点发送：
 
 ```bash
 sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.1 --data-port 6200 --send-file data.mp4 --dest-ip 10.0.0.12 --exit-after-send
@@ -123,18 +121,12 @@ sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_for
 - 从对应 OLSR 节点进程启动开始计时
 - 到该节点第一次得到目标路由为止
 
-因此，不再建议用“尽快手工敲命令”的方式近似测量。现在 `overlay_bench.py route` 会同时给出两个字段：
+`overlay_bench.py route` 会同时给出两个字段：
 
 - `startup_route_convergence_sec`
-  这是你真正要的指标，表示从协议节点启动到该路由首次建立成功的时间
+  从协议节点启动到该路由首次建立成功的时间
 - `route_setup_sec`
-  这是从你执行这条 benchmark 命令开始，到它查到路由的时间，只是辅助值
-
-推荐做法：
-
-1. 先启动 OLSR 节点
-2. 等网络稳定后再执行下面命令读取结果
-3. 以返回结果中的 `startup_route_convergence_sec` 为准
+  从你执行 benchmark 命令开始，到它查到路由的时间，仅作辅助值
 
 命令如下：
 
@@ -142,7 +134,7 @@ sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_for
 sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py route --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --json
 ```
 
-如果你使用一键脚本自动跑：
+一键自动跑：
 
 ```bash
 cd /home/admin/overlay_OLSR_mininet
@@ -151,7 +143,22 @@ sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfe
 
 ### 2. 吞吐量与丢包率
 
-先在除源节点外的其它节点启动 benchmark daemon：
+现在的吞吐量/丢包率测量采用“单向统计”方式：
+
+- 源节点发送测试流量和结束报文
+- 目的节点在本地统计收到的包数、字节数、重复包数
+- 目的节点把统计结果写入 `logs/overlay_bench_results/`
+- 源节点轮询该结果文件并给出最终 JSON 结果
+
+这样避免了旧版本里“目的节点必须再通过覆盖网络回传统计结果”的脆弱路径。
+
+手工测试前，建议先清掉旧的 daemon：
+
+```bash
+pkill -f "overlay_bench.py"
+```
+
+然后在除源节点外的其它节点启动 benchmark daemon：
 
 ```bash
 sta2 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.2 --data-port 6300 &
@@ -167,22 +174,33 @@ sta11 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_
 sta12 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.12 --data-port 6300 &
 ```
 
-然后在源节点执行吞吐量/丢包率测试：
+源节点执行吞吐量/丢包率测试：
 
 ```bash
-sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py throughput --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --data-port 6300 --count 1000 --payload-size 1000 --json
+sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py throughput --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --data-port 6300 --count 300 --payload-size 512 --interval-ms 2 --report-timeout-sec 30 --json
 ```
 
-返回结果中的关键字段：
+建议先从较保守参数开始，例如上面的 `300` 包、`512` 字节、`2ms` 间隔，跑通后再逐步增大。
 
-- `startup_route_convergence_sec`
-  若命令中带出了对应路由状态，则表示启动后首次路由建立时间
+结果中的关键字段：
+
 - `goodput_mbps`
   实测吞吐量
 - `loss_rate`
   丢包率
 - `pdr`
   包投递率
+- `received_packets`
+  目的节点实际接收包数
+- `lost_packets`
+  丢失包数
+- `result_path`
+  目的节点写出的统计结果文件路径
+
+如果你使用一键脚本：
+
+- `tools/mininet_wifi_complex_12sta.py` 现在会在 bench 前自动清理旧 daemon 和旧结果文件
+- bench 结束后会直接打印 JSON 结果和 `throughput_result_file`
 
 ## 资源占用查看
 
