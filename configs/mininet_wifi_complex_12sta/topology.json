@@ -1,0 +1,143 @@
+{
+  "name": "complex_12sta",
+  "notes": "Static Mininet-WiFi coordinates for the 12-station OLSR overlay topology.",
+  "ssid": "olsr-adhoc",
+  "mode": "g",
+  "channel": 1,
+  "radio_range": 38.0,
+  "propagation_model": "logDistance",
+  "propagation_exp": 4.0,
+  "video_source": "sta1",
+  "video_dest": "sta12",
+  "video_dest_ip": "10.0.0.12",
+  "stations": [
+    {
+      "name": "sta1",
+      "ip": "10.0.0.1/24",
+      "x": 20,
+      "y": 85
+    },
+    {
+      "name": "sta2",
+      "ip": "10.0.0.2/24",
+      "x": 52,
+      "y": 90
+    },
+    {
+      "name": "sta3",
+      "ip": "10.0.0.3/24",
+      "x": 87,
+      "y": 90
+    },
+    {
+      "name": "sta4",
+      "ip": "10.0.0.4/24",
+      "x": 16,
+      "y": 52
+    },
+    {
+      "name": "sta5",
+      "ip": "10.0.0.5/24",
+      "x": 50,
+      "y": 72
+    },
+    {
+      "name": "sta6",
+      "ip": "10.0.0.6/24",
+      "x": 82,
+      "y": 58
+    },
+    {
+      "name": "sta7",
+      "ip": "10.0.0.7/24",
+      "x": 72,
+      "y": 42
+    },
+    {
+      "name": "sta8",
+      "ip": "10.0.0.8/24",
+      "x": 20,
+      "y": 20
+    },
+    {
+      "name": "sta9",
+      "ip": "10.0.0.9/24",
+      "x": 58,
+      "y": 30
+    },
+    {
+      "name": "sta10",
+      "ip": "10.0.0.10/24",
+      "x": 102,
+      "y": 24
+    },
+    {
+      "name": "sta11",
+      "ip": "10.0.0.11/24",
+      "x": 89,
+      "y": 7
+    },
+    {
+      "name": "sta12",
+      "ip": "10.0.0.12/24",
+      "x": 53,
+      "y": 17
+    }
+  ],
+  "edges": {
+    "sta1": [
+      "sta2",
+      "sta4",
+      "sta5"
+    ],
+    "sta2": [
+      "sta1",
+      "sta3",
+      "sta5"
+    ],
+    "sta3": [
+      "sta2",
+      "sta6"
+    ],
+    "sta4": [
+      "sta1",
+      "sta8"
+    ],
+    "sta5": [
+      "sta1",
+      "sta2",
+      "sta7"
+    ],
+    "sta6": [
+      "sta3",
+      "sta7"
+    ],
+    "sta7": [
+      "sta5",
+      "sta6",
+      "sta9",
+      "sta10"
+    ],
+    "sta8": [
+      "sta4",
+      "sta12"
+    ],
+    "sta9": [
+      "sta7",
+      "sta12"
+    ],
+    "sta10": [
+      "sta7",
+      "sta11"
+    ],
+    "sta11": [
+      "sta10",
+      "sta12"
+    ],
+    "sta12": [
+      "sta8",
+      "sta9",
+      "sta11"
+    ]
+  }
+}
