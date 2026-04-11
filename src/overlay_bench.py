@@ -43,6 +43,8 @@ class RouteInfo:
     hop_count: int
     valid: bool
     state: str
+    first_seen_at: float | None = None
+    protocol_started_at: float | None = None
 
 
 @dataclass
@@ -190,6 +192,8 @@ class OverlayBenchNode:
             hop_count=int(fields["hop_count"]),
             valid=valid,
             state=state,
+            first_seen_at=float(fields["first_seen_at"]) if "first_seen_at" in fields else None,
+            protocol_started_at=float(fields["protocol_started_at"]) if "protocol_started_at" in fields else None,
         )
 
     def establish_route(self, dest_ip: str) -> tuple[RouteInfo, float]:
@@ -441,11 +445,15 @@ def run_route_command(args: argparse.Namespace) -> int:
     node = build_node(args)
     try:
         route, route_setup_sec = node.establish_route(args.dest_ip)
+        startup_route_convergence_sec = None
+        if route.first_seen_at is not None and route.protocol_started_at is not None:
+            startup_route_convergence_sec = max(0.0, route.first_seen_at - route.protocol_started_at)
         result = {
             "metric": "route_convergence",
             "src_ip": args.node_ip,
             "dest_ip": args.dest_ip,
             "route_setup_sec": round(route_setup_sec, 6),
+            "startup_route_convergence_sec": round(startup_route_convergence_sec, 6) if startup_route_convergence_sec is not None else None,
             "next_hop_ip": route.next_hop_ip,
             "hop_count": route.hop_count,
             "send_retry_events": node.send_retry_events,
