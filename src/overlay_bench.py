@@ -102,6 +102,7 @@ class OverlayBenchNode:
         self,
         node_ip: str,
         data_port: int,
+        bind_port: int,
         control_client: ControlClient,
         route_timeout_sec: float,
         route_poll_interval_sec: float,
@@ -113,6 +114,7 @@ class OverlayBenchNode:
     ):
         self.node_ip = node_ip
         self.data_port = int(data_port)
+        self.bind_port = int(bind_port)
         self.control_client = control_client
         self.route_timeout_sec = float(route_timeout_sec)
         self.route_poll_interval_sec = float(route_poll_interval_sec)
@@ -123,7 +125,7 @@ class OverlayBenchNode:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, int(socket_sndbuf_bytes))
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, int(socket_rcvbuf_bytes))
-        self.sock.bind(("0.0.0.0", self.data_port))
+        self.sock.bind(("0.0.0.0", self.bind_port))
         self.sock.setblocking(False)
         self._stop_event = threading.Event()
         self._waiters: dict[tuple[str, str], queue.Queue[dict[str, Any]]] = {}
@@ -470,10 +472,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_node(args: argparse.Namespace) -> OverlayBenchNode:
+    bind_port = int(getattr(args, "bind_port", args.data_port))
     control = ControlClient(control_ip=args.control_ip, control_port=args.control_port)
     return OverlayBenchNode(
         node_ip=args.node_ip,
         data_port=args.data_port,
+        bind_port=bind_port,
         control_client=control,
         route_timeout_sec=args.route_timeout_sec,
         route_poll_interval_sec=args.route_poll_interval_sec,
@@ -486,6 +490,7 @@ def build_node(args: argparse.Namespace) -> OverlayBenchNode:
 
 
 def run_route_command(args: argparse.Namespace) -> int:
+    args.bind_port = 0
     node = build_node(args)
     try:
         route, route_setup_sec = node.establish_route(args.dest_ip)
@@ -511,6 +516,7 @@ def run_route_command(args: argparse.Namespace) -> int:
 
 
 def run_latency_command(args: argparse.Namespace) -> int:
+    args.bind_port = args.data_port
     node = build_node(args)
     try:
         listener = node.start_background()
@@ -577,9 +583,9 @@ def run_latency_command(args: argparse.Namespace) -> int:
 
 
 def run_throughput_command(args: argparse.Namespace) -> int:
+    args.bind_port = 0
     node = build_node(args)
     try:
-        listener = node.start_background()
         route, route_setup_sec = node.establish_route(args.dest_ip)
         payload_text = "x" * int(args.payload_size)
         session_id = uuid.uuid4().hex
@@ -635,9 +641,6 @@ def run_throughput_command(args: argparse.Namespace) -> int:
                 f"throughput result timeout for session={session_id} "
                 f"dest={args.dest_ip} after {float(args.report_timeout_sec):.3f}s"
             )
-        node._stop_event.set()
-        listener.join(timeout=1.0)
-
         sent_packets = int(args.count)
         sent_bytes = sent_packets * int(args.payload_size)
         sender_duration_sec = max(1e-9, (send_end_ns - send_start_ns) / 1_000_000_000.0)
