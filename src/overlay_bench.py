@@ -19,6 +19,7 @@ APP_VERSION = 1
 DEFAULT_DATA_PORT = 6300
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOCKET_BUFFER_BYTES = 1_048_576
+DEFAULT_END_RETRY_INTERVAL_SEC = 1.0
 
 
 class Tee:
@@ -113,9 +114,11 @@ class OverlayBenchNode:
         self._stop_event = threading.Event()
         self._waiters: dict[tuple[str, str], queue.Queue[dict[str, Any]]] = {}
         self._waiters_lock = threading.Lock()
+        self._pending_packets: dict[tuple[str, str], dict[str, Any]] = {}
         self._route_cache: dict[str, RouteInfo] = {}
         self._route_lock = threading.Lock()
         self._throughput_sessions: dict[str, ThroughputSession] = {}
+        self._completed_throughput_reports: dict[str, dict[str, Any]] = {}
         self.send_retry_count = 0
         self.send_retry_events = 0
         self.send_failures = 0
@@ -142,6 +145,12 @@ class OverlayBenchNode:
         wait_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         with self._waiters_lock:
             self._waiters[key] = wait_queue
+            pending = self._pending_packets.pop(key, None)
+        if pending is not None:
+            try:
+                wait_queue.put_nowait(pending)
+            except queue.Full:
+                pass
         return wait_queue
 
     def pop_waiter(self, wait_kind: str, wait_id: str) -> None:
@@ -154,6 +163,8 @@ class OverlayBenchNode:
         with self._waiters_lock:
             wait_queue = self._waiters.get(key)
         if wait_queue is None:
+            with self._waiters_lock:
+                self._pending_packets[key] = packet
             return False
         try:
             wait_queue.put_nowait(packet)
@@ -286,6 +297,10 @@ class OverlayBenchNode:
     def handle_throughput_end(self, packet: dict[str, Any]) -> None:
         session_id = str(packet["session_id"])
         src_ip = str(packet["src_ip"])
+        cached_report = self._completed_throughput_reports.get(session_id)
+        if cached_report is not None:
+            self.send_overlay(cached_report)
+            return
         session = self._throughput_sessions.get(session_id)
         if session is None:
             session = ThroughputSession(session_id=session_id, src_ip=src_ip)
@@ -308,6 +323,7 @@ class OverlayBenchNode:
             "last_rx_ns": last_rx_ns,
             "duration_ns": duration_ns,
         }
+        self._completed_throughput_reports[session_id] = report
         self.send_overlay(report)
         self._throughput_sessions.pop(session_id, None)
 
@@ -315,6 +331,10 @@ class OverlayBenchNode:
         session_id = str(packet.get("session_id", ""))
         if not self.deliver_waiter("throughput_report", session_id, packet):
             self.log(f"unhandled throughput report session_id={session_id}")
+
+    def handle_throughput_report_ack(self, packet: dict[str, Any]) -> None:
+        session_id = str(packet.get("session_id", ""))
+        self._completed_throughput_reports.pop(session_id, None)
 
     def handle_local(self, packet: dict[str, Any]) -> None:
         kind = str(packet.get("kind", ""))
@@ -328,6 +348,8 @@ class OverlayBenchNode:
             self.handle_throughput_end(packet)
         elif kind == "throughput_report":
             self.handle_throughput_report(packet)
+        elif kind == "throughput_report_ack":
+            self.handle_throughput_report_ack(packet)
 
     def handle_packet(self, raw: bytes) -> None:
         try:
@@ -394,6 +416,12 @@ def add_common_node_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--quiet", action="store_true", help="Reduce benchmark daemon and sender log output.")
     parser.add_argument("--log-file", help="Optional log file path.")
     parser.add_argument("--json", action="store_true", help="Print only one JSON line result for sender commands.")
+    parser.add_argument(
+        "--end-retry-interval-sec",
+        type=float,
+        default=DEFAULT_END_RETRY_INTERVAL_SEC,
+        help="Retry interval while waiting for throughput_report after sending throughput_end.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -476,6 +504,7 @@ def run_latency_command(args: argparse.Namespace) -> int:
         lost = 0
         for _index in range(int(args.count)):
             ping_id = uuid.uuid4().hex
+            reply_queue = node.register_waiter("ping_reply", ping_id)
             packet = {
                 "app": APP_NAME,
                 "version": APP_VERSION,
@@ -488,13 +517,15 @@ def run_latency_command(args: argparse.Namespace) -> int:
                 "payload": payload_text,
             }
             start_ns = time.perf_counter_ns()
-            node.send_overlay(packet)
             try:
-                node.wait_for_packet("ping_reply", ping_id, timeout_sec=float(args.reply_timeout_sec))
+                node.send_overlay(packet)
+                reply_queue.get(timeout=float(args.reply_timeout_sec))
                 rtt_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
                 rtts_ms.append(rtt_ms)
             except queue.Empty:
                 lost += 1
+            finally:
+                node.pop_waiter("ping_reply", ping_id)
             if args.interval_ms > 0:
                 time.sleep(float(args.interval_ms) / 1000.0)
         node._stop_event.set()
@@ -563,8 +594,39 @@ def run_throughput_command(args: argparse.Namespace) -> int:
             "expected_packets": int(args.count),
             "expected_bytes": int(args.count) * int(args.payload_size),
         }
-        node.send_overlay(end_packet)
-        report = node.wait_for_packet("throughput_report", session_id, timeout_sec=float(args.report_timeout_sec))
+        report_queue = node.register_waiter("throughput_report", session_id)
+        report = None
+        deadline = time.monotonic() + float(args.report_timeout_sec)
+        try:
+            while time.monotonic() < deadline:
+                node.send_overlay(end_packet)
+                wait_timeout = min(
+                    float(args.end_retry_interval_sec),
+                    max(0.0, deadline - time.monotonic()),
+                )
+                if wait_timeout <= 0:
+                    break
+                try:
+                    report = report_queue.get(timeout=wait_timeout)
+                    break
+                except queue.Empty:
+                    continue
+        finally:
+            node.pop_waiter("throughput_report", session_id)
+        if report is None:
+            raise TimeoutError(
+                f"throughput_report timeout for session={session_id} "
+                f"dest={args.dest_ip} after {float(args.report_timeout_sec):.3f}s"
+            )
+        ack_packet = {
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "kind": "throughput_report_ack",
+            "src_ip": args.node_ip,
+            "dest_ip": str(report["src_ip"]),
+            "session_id": session_id,
+        }
+        node.send_overlay(ack_packet)
         node._stop_event.set()
         listener.join(timeout=1.0)
 
