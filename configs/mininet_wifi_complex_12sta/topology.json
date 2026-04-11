@@ -1,10 +1,10 @@
 {
   "name": "complex_12sta",
-  "notes": "Static Mininet-WiFi coordinates for the 12-station OLSR overlay topology.",
+  "notes": "Conservative Mininet-WiFi coordinates tuned to reduce unintended wireless adjacencies for the 12-station OLSR overlay topology.",
   "ssid": "olsr-adhoc",
   "mode": "g",
   "channel": 1,
-  "radio_range": 38.0,
+  "radio_range": 39.0,
   "propagation_model": "logDistance",
   "propagation_exp": 4.0,
   "video_source": "sta1",
@@ -14,74 +14,74 @@
     {
       "name": "sta1",
       "ip": "10.0.0.1/24",
-      "x": 20,
-      "y": 85
+      "x": 14,
+      "y": 34
     },
     {
       "name": "sta2",
       "ip": "10.0.0.2/24",
-      "x": 52,
-      "y": 90
+      "x": 34,
+      "y": 60
     },
     {
       "name": "sta3",
       "ip": "10.0.0.3/24",
-      "x": 87,
-      "y": 90
+      "x": 66,
+      "y": 74
     },
     {
       "name": "sta4",
       "ip": "10.0.0.4/24",
-      "x": 16,
-      "y": 52
+      "x": -6,
+      "y": 8
     },
     {
       "name": "sta5",
       "ip": "10.0.0.5/24",
-      "x": 50,
-      "y": 72
+      "x": 35,
+      "y": 46
     },
     {
       "name": "sta6",
       "ip": "10.0.0.6/24",
-      "x": 82,
-      "y": 58
+      "x": 88,
+      "y": 60
     },
     {
       "name": "sta7",
       "ip": "10.0.0.7/24",
-      "x": 72,
-      "y": 42
+      "x": 70,
+      "y": 34
     },
     {
       "name": "sta8",
       "ip": "10.0.0.8/24",
-      "x": 20,
-      "y": 20
+      "x": 22,
+      "y": -10
     },
     {
       "name": "sta9",
       "ip": "10.0.0.9/24",
-      "x": 58,
-      "y": 30
+      "x": 60,
+      "y": 14
     },
     {
       "name": "sta10",
       "ip": "10.0.0.10/24",
-      "x": 102,
-      "y": 24
+      "x": 104,
+      "y": 20
     },
     {
       "name": "sta11",
       "ip": "10.0.0.11/24",
-      "x": 89,
-      "y": 7
+      "x": 94,
+      "y": -14
     },
     {
       "name": "sta12",
       "ip": "10.0.0.12/24",
-      "x": 53,
-      "y": 17
+      "x": 58,
+      "y": -8
     }
   ],
   "edges": {
