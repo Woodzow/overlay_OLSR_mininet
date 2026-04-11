@@ -20,6 +20,8 @@ DEFAULT_DATA_PORT = 6300
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOCKET_BUFFER_BYTES = 1_048_576
 DEFAULT_END_RETRY_INTERVAL_SEC = 1.0
+DEFAULT_REPORT_RETRY_INTERVAL_SEC = 1.0
+DEFAULT_PREFLIGHT_RETRIES = 3
 
 
 class Tee:
@@ -119,6 +121,7 @@ class OverlayBenchNode:
         self._route_lock = threading.Lock()
         self._throughput_sessions: dict[str, ThroughputSession] = {}
         self._completed_throughput_reports: dict[str, dict[str, Any]] = {}
+        self._completed_report_retry_at: dict[str, float] = {}
         self.send_retry_count = 0
         self.send_retry_events = 0
         self.send_failures = 0
@@ -299,7 +302,7 @@ class OverlayBenchNode:
         src_ip = str(packet["src_ip"])
         cached_report = self._completed_throughput_reports.get(session_id)
         if cached_report is not None:
-            self.send_overlay(cached_report)
+            self.try_send_completed_report(session_id, cached_report)
             return
         session = self._throughput_sessions.get(session_id)
         if session is None:
@@ -324,7 +327,8 @@ class OverlayBenchNode:
             "duration_ns": duration_ns,
         }
         self._completed_throughput_reports[session_id] = report
-        self.send_overlay(report)
+        self._completed_report_retry_at[session_id] = time.monotonic()
+        self.try_send_completed_report(session_id, report)
         self._throughput_sessions.pop(session_id, None)
 
     def handle_throughput_report(self, packet: dict[str, Any]) -> None:
@@ -335,6 +339,25 @@ class OverlayBenchNode:
     def handle_throughput_report_ack(self, packet: dict[str, Any]) -> None:
         session_id = str(packet.get("session_id", ""))
         self._completed_throughput_reports.pop(session_id, None)
+        self._completed_report_retry_at.pop(session_id, None)
+
+    def try_send_completed_report(self, session_id: str, report: dict[str, Any]) -> bool:
+        try:
+            self.send_overlay(report)
+            self._completed_report_retry_at[session_id] = time.monotonic() + DEFAULT_REPORT_RETRY_INTERVAL_SEC
+            return True
+        except Exception as exc:
+            self._completed_report_retry_at[session_id] = time.monotonic() + DEFAULT_REPORT_RETRY_INTERVAL_SEC
+            self.log(f"report send retry scheduled session_id={session_id} error={exc}")
+            return False
+
+    def retry_completed_reports(self) -> None:
+        now = time.monotonic()
+        for session_id, report in list(self._completed_throughput_reports.items()):
+            retry_at = self._completed_report_retry_at.get(session_id, now)
+            if retry_at > now:
+                continue
+            self.try_send_completed_report(session_id, report)
 
     def handle_local(self, packet: dict[str, Any]) -> None:
         kind = str(packet.get("kind", ""))
@@ -374,13 +397,17 @@ class OverlayBenchNode:
     def run(self) -> None:
         self.log(f"benchmark daemon listening on udp/{self.data_port}")
         while not self._stop_event.is_set():
+            self.retry_completed_reports()
             try:
                 readable, _, _ = select.select([self.sock], [], [], 0.5)
             except (OSError, ValueError):
                 break
             for sock in readable:
-                raw, _remote = sock.recvfrom(65535)
-                self.handle_packet(raw)
+                try:
+                    raw, _remote = sock.recvfrom(65535)
+                    self.handle_packet(raw)
+                except Exception as exc:
+                    self.log(f"packet handling error: {exc}")
 
 
 def configure_log_file(log_file: str | None) -> None:
@@ -421,6 +448,12 @@ def add_common_node_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=DEFAULT_END_RETRY_INTERVAL_SEC,
         help="Retry interval while waiting for throughput_report after sending throughput_end.",
+    )
+    parser.add_argument(
+        "--preflight-retries",
+        type=int,
+        default=DEFAULT_PREFLIGHT_RETRIES,
+        help="Round-trip preflight attempts before throughput test to confirm reverse-path readiness.",
     )
 
 
@@ -560,11 +593,43 @@ def run_latency_command(args: argparse.Namespace) -> int:
         node.close()
 
 
+def run_preflight_roundtrip(node: OverlayBenchNode, dest_ip: str, retries: int, timeout_sec: float) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for _attempt in range(max(1, int(retries))):
+        ping_id = uuid.uuid4().hex
+        reply_queue = node.register_waiter("ping_reply", ping_id)
+        packet = {
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "kind": "ping",
+            "src_ip": node.node_ip,
+            "dest_ip": dest_ip,
+            "ping_id": ping_id,
+            "send_ts_ns": time.perf_counter_ns(),
+            "payload_size": 8,
+            "payload": "warmup",
+        }
+        try:
+            node.send_overlay(packet)
+            return reply_queue.get(timeout=float(timeout_sec))
+        except Exception as exc:
+            last_error = exc
+        finally:
+            node.pop_waiter("ping_reply", ping_id)
+    raise TimeoutError(f"preflight roundtrip timeout for dest={dest_ip}: {last_error}")
+
+
 def run_throughput_command(args: argparse.Namespace) -> int:
     node = build_node(args)
     try:
         listener = node.start_background()
         route, route_setup_sec = node.establish_route(args.dest_ip)
+        run_preflight_roundtrip(
+            node=node,
+            dest_ip=args.dest_ip,
+            retries=int(args.preflight_retries),
+            timeout_sec=max(1.0, min(float(args.report_timeout_sec), 5.0)),
+        )
         payload_text = "x" * int(args.payload_size)
         session_id = uuid.uuid4().hex
         send_start_ns = time.perf_counter_ns()
