@@ -67,6 +67,16 @@ def send_control(node, command: str, timeout_sec: float = 3.0, port: int = 5100)
     return run_cmd(node, f"python3 -c {shlex.quote(script)}")
 
 
+def parse_key_value_lines(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
 def start_olsr(node, repo_root: Path) -> None:
     repo_text = shlex.quote(str(repo_root))
     src_text = shlex.quote(str(repo_root / "src"))
@@ -154,6 +164,33 @@ def station_name_of_ip(topology: dict, target_ip: str) -> str:
         if station_ip == target_ip:
             return item["name"]
     raise KeyError(f"unknown destination ip in topology: {target_ip}")
+
+
+def resolve_overlay_path(stations_by_name: dict[str, object], topology: dict, source_name: str, dest_ip: str) -> list[str]:
+    source_ip = source_ip_of(topology, source_name)
+    path = [source_ip]
+    current_name = source_name
+    current_ip = source_ip
+    visited = {source_ip}
+
+    while current_ip != dest_ip:
+        detail = send_control(stations_by_name[current_name], f"SHOW_ROUTE_DETAIL:{dest_ip}")
+        fields = parse_key_value_lines(detail)
+        next_hop_ip = fields.get("next_hop_ip", "")
+        valid = fields.get("valid", "").lower() == "true"
+        state = fields.get("state", "")
+        if (not next_hop_ip) or (not valid) or state != "VALID":
+            raise RuntimeError(f"path resolution failed at {current_name}: {detail}")
+        if next_hop_ip in visited:
+            raise RuntimeError(f"path resolution loop detected at next_hop={next_hop_ip}")
+        path.append(next_hop_ip)
+        visited.add(next_hop_ip)
+        current_ip = next_hop_ip
+        if current_ip == dest_ip:
+            break
+        current_name = station_name_of_ip(topology, current_ip)
+
+    return path
 
 
 def topology_edges(topology: dict) -> list[tuple[str, str]]:
@@ -327,13 +364,19 @@ def automated_bench(
     info("\n=== route convergence benchmark ===\n")
     info(json.dumps(route_result, ensure_ascii=False, indent=2) + "\n")
 
+    resolved_path = resolve_overlay_path(stations_by_name, topology, source_name, dest_ip)
+    info("\n=== resolved overlay path ===\n")
+    info(" -> ".join(resolved_path) + "\n")
+
     throughput_cmd = (
         f"cd {shlex.quote(str(repo_root))} && "
         f"PYTHONPATH={shlex.quote(str(repo_root / 'src'))} "
         f"python3 src/overlay_bench.py throughput --node-ip {source_ip_of(topology, source_name)} "
         f"--dest-ip {dest_ip} --data-port {int(data_port)} --count {int(count)} "
         f"--payload-size {int(payload_size)} --interval-ms {float(interval_ms)} "
-        f"--report-timeout-sec {float(report_timeout_sec)} --quiet --json"
+        f"--report-timeout-sec {float(report_timeout_sec)} "
+        f"--path {shlex.quote(','.join(resolved_path))} "
+        f"--quiet --json"
     )
     throughput_result = json.loads(run_cmd(source_node, throughput_cmd))
     info("\n=== throughput/loss benchmark ===\n")

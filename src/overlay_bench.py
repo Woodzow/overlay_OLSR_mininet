@@ -244,18 +244,41 @@ class OverlayBenchNode:
         route, _ = self.establish_route(dest_ip)
         return route
 
+    def resolve_path_next_hop(self, packet: dict[str, Any]) -> tuple[str, int] | None:
+        raw_path = packet.get("path")
+        if not isinstance(raw_path, list) or len(raw_path) < 2:
+            return None
+        path = [str(item) for item in raw_path]
+        current_index = int(packet.get("path_index", 0))
+        if current_index < len(path) and path[current_index] == self.node_ip:
+            pass
+        elif self.node_ip in path:
+            current_index = path.index(self.node_ip)
+        else:
+            raise RuntimeError(f"node {self.node_ip} is not in explicit path {path}")
+        next_index = current_index + 1
+        if next_index >= len(path):
+            raise RuntimeError(f"no next hop available for node {self.node_ip} in explicit path {path}")
+        return path[next_index], next_index
+
     def send_overlay(self, packet: dict[str, Any]) -> None:
         dest_ip = str(packet["dest_ip"])
-        route = self.resolve_next_hop(dest_ip)
+        explicit_next = self.resolve_path_next_hop(packet)
+        if explicit_next is not None:
+            next_hop_ip, next_index = explicit_next
+            packet["path_index"] = next_index
+        else:
+            route = self.resolve_next_hop(dest_ip)
+            next_hop_ip = route.next_hop_ip
         raw = json.dumps(packet, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         retry_used = False
         for attempt in range(self.send_retries + 1):
             try:
-                self.sock.sendto(raw, (route.next_hop_ip, self.data_port))
+                self.sock.sendto(raw, (next_hop_ip, self.data_port))
                 if retry_used:
                     self.send_retry_events += 1
                 self.log(
-                    f"send kind={packet.get('kind')} dest={dest_ip} next_hop={route.next_hop_ip} "
+                    f"send kind={packet.get('kind')} dest={dest_ip} next_hop={next_hop_ip} "
                     f"retry_used={retry_used} attempt={attempt + 1}"
                 )
                 return
@@ -435,6 +458,10 @@ def add_common_node_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--log-file", help="Optional log file path.")
     parser.add_argument("--json", action="store_true", help="Print only one JSON line result for sender commands.")
     parser.add_argument(
+        "--path",
+        help="Optional comma-separated hop IP list for explicit source-routed forwarding, e.g. 10.0.0.1,10.0.0.4,10.0.0.8,10.0.0.12",
+    )
+    parser.add_argument(
         "--end-retry-interval-sec",
         type=float,
         default=DEFAULT_END_RETRY_INTERVAL_SEC,
@@ -587,6 +614,15 @@ def run_throughput_command(args: argparse.Namespace) -> int:
     node = build_node(args)
     try:
         route, route_setup_sec = node.establish_route(args.dest_ip)
+        explicit_path = None
+        if args.path:
+            explicit_path = [item.strip() for item in str(args.path).split(",") if item.strip()]
+            if len(explicit_path) < 2:
+                raise ValueError("--path must contain at least source and destination IPs")
+            if explicit_path[0] != args.node_ip:
+                raise ValueError(f"--path must start with source ip {args.node_ip}")
+            if explicit_path[-1] != args.dest_ip:
+                raise ValueError(f"--path must end with destination ip {args.dest_ip}")
         payload_text = "x" * int(args.payload_size)
         session_id = uuid.uuid4().hex
         result_path = session_result_path(args.dest_ip, session_id)
@@ -606,6 +642,9 @@ def run_throughput_command(args: argparse.Namespace) -> int:
                 "payload_size": int(args.payload_size),
                 "payload": payload_text,
             }
+            if explicit_path is not None:
+                packet["path"] = list(explicit_path)
+                packet["path_index"] = 0
             node.send_overlay(packet)
             if args.interval_ms > 0:
                 time.sleep(float(args.interval_ms) / 1000.0)
@@ -620,6 +659,9 @@ def run_throughput_command(args: argparse.Namespace) -> int:
             "expected_packets": int(args.count),
             "expected_bytes": int(args.count) * int(args.payload_size),
         }
+        if explicit_path is not None:
+            end_packet["path"] = list(explicit_path)
+            end_packet["path_index"] = 0
         deadline = time.monotonic() + float(args.report_timeout_sec)
         result = None
         while time.monotonic() < deadline:
@@ -659,6 +701,7 @@ def run_throughput_command(args: argparse.Namespace) -> int:
             "route_setup_sec": round(route_setup_sec, 6),
             "next_hop_ip": route.next_hop_ip,
             "hop_count": route.hop_count,
+            "path": explicit_path,
             "sent_packets": sent_packets,
             "received_packets": received_packets,
             "lost_packets": loss_packets,

@@ -150,9 +150,24 @@ sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfe
 - 目的节点把统计结果写入 `logs/overlay_bench_results/`
 - 源节点轮询该结果文件并给出最终 JSON 结果
 
-这样避免了旧版本里“目的节点必须再通过覆盖网络回传统计结果”的脆弱路径。
+并且自动化脚本现在会先从各节点的 OLSR 路由表解析出一条确定的 hop-by-hop 路径，再按这条显式路径转发 benchmark 报文，而不是在每个中继临时重新查下一跳。这样比旧版稳定很多。
 
-手工测试前，建议先清掉旧的 daemon：
+推荐优先使用一键脚本：
+
+```bash
+cd /home/admin/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer
+```
+
+它会自动：
+
+- 清理旧的 `overlay_bench.py daemon`
+- 清理旧结果文件
+- 重启 relay/destination daemon
+- 解析一条显式 overlay 路径
+- 打印吞吐量 JSON 结果和结果文件路径
+
+如果你要手工测试，先清掉旧的 daemon：
 
 ```bash
 pkill -f "overlay_bench.py"
@@ -174,10 +189,11 @@ sta11 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_
 sta12 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.12 --data-port 6300 &
 ```
 
-源节点执行吞吐量/丢包率测试：
+源节点执行吞吐量/丢包率测试时，建议带一条显式路径。  
+例如如果当前解析出的路径是 `10.0.0.1 -> 10.0.0.4 -> 10.0.0.8 -> 10.0.0.12`，则命令为：
 
 ```bash
-sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py throughput --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --data-port 6300 --count 300 --payload-size 512 --interval-ms 2 --report-timeout-sec 30 --json
+sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py throughput --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --data-port 6300 --count 300 --payload-size 512 --interval-ms 2 --report-timeout-sec 30 --path 10.0.0.1,10.0.0.4,10.0.0.8,10.0.0.12 --json
 ```
 
 建议先从较保守参数开始，例如上面的 `300` 包、`512` 字节、`2ms` 间隔，跑通后再逐步增大。
@@ -196,11 +212,6 @@ sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_b
   丢失包数
 - `result_path`
   目的节点写出的统计结果文件路径
-
-如果你使用一键脚本：
-
-- `tools/mininet_wifi_complex_12sta.py` 现在会在 bench 前自动清理旧 daemon 和旧结果文件
-- bench 结束后会直接打印 JSON 结果和 `throughput_result_file`
 
 ## 资源占用查看
 
