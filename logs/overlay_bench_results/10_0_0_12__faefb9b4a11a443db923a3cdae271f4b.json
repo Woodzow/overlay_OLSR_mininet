@@ -1,0 +1,1 @@
+{"app":"overlay_bench","version":1,"metric":"throughput","session_id":"faefb9b4a11a443db923a3cdae271f4b","src_ip":"10.0.0.1","dest_ip":"10.0.0.12","receiver_ip":"10.0.0.12","expected_packets":500,"expected_bytes":500000,"received_packets":0,"received_bytes":0,"duplicate_packets":0,"first_rx_ns":0,"last_rx_ns":0,"duration_ns":0,"result_written_at_sec":1775907046.4209163}
