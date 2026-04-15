@@ -327,7 +327,7 @@ def automated_file_transfer(
     info("*** One-click file transfer succeeded\n")
 
 
-def automated_bench(
+def run_overlay_bench(
     repo_root: Path,
     stations,
     topology: dict,
@@ -338,7 +338,7 @@ def automated_bench(
     payload_size: int,
     interval_ms: float,
     report_timeout_sec: float,
-) -> None:
+) -> tuple[dict, dict, list[str]]:
     stations_by_name = {node.name: node for node in stations}
     source_node = stations_by_name[source_name]
 
@@ -361,12 +361,8 @@ def automated_bench(
         f"--dest-ip {dest_ip} --data-port {int(data_port)} --quiet --json"
     )
     route_result = json.loads(run_cmd(source_node, route_cmd))
-    info("\n=== route convergence benchmark ===\n")
-    info(json.dumps(route_result, ensure_ascii=False, indent=2) + "\n")
 
     resolved_path = resolve_overlay_path(stations_by_name, topology, source_name, dest_ip)
-    info("\n=== resolved overlay path ===\n")
-    info(" -> ".join(resolved_path) + "\n")
 
     throughput_cmd = (
         f"cd {shlex.quote(str(repo_root))} && "
@@ -379,6 +375,37 @@ def automated_bench(
         f"--quiet --json"
     )
     throughput_result = json.loads(run_cmd(source_node, throughput_cmd))
+    return route_result, throughput_result, resolved_path
+
+
+def automated_bench(
+    repo_root: Path,
+    stations,
+    topology: dict,
+    source_name: str,
+    dest_ip: str,
+    data_port: int,
+    count: int,
+    payload_size: int,
+    interval_ms: float,
+    report_timeout_sec: float,
+) -> None:
+    route_result, throughput_result, resolved_path = run_overlay_bench(
+        repo_root=repo_root,
+        stations=stations,
+        topology=topology,
+        source_name=source_name,
+        dest_ip=dest_ip,
+        data_port=data_port,
+        count=count,
+        payload_size=payload_size,
+        interval_ms=interval_ms,
+        report_timeout_sec=report_timeout_sec,
+    )
+    info("\n=== route convergence benchmark ===\n")
+    info(json.dumps(route_result, ensure_ascii=False, indent=2) + "\n")
+    info("\n=== resolved overlay path ===\n")
+    info(" -> ".join(resolved_path) + "\n")
     info("\n=== throughput/loss benchmark ===\n")
     info(json.dumps(throughput_result, ensure_ascii=False, indent=2) + "\n")
     result_path = throughput_result.get("result_path")

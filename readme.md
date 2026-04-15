@@ -64,6 +64,18 @@ cd /home/admin/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer --link-loss 5
 ```
 
+一键扫描底层 `tc` 丢包率 1%-10%，统计 `sta1 -> sta12` 的吞吐量和端到端丢包率变化：
+
+```bash
+cd /home/admin/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_loss_sweep_12sta.py
+```
+
+结果会写到：
+
+- `/home/admin/overlay_OLSR_mininet/logs/loss_sweep_12sta/summary.json`
+- `/home/admin/overlay_OLSR_mininet/logs/loss_sweep_12sta/summary.csv`
+
 ## Mininet-WiFi CLI 常用测试命令
 
 ```bash
@@ -212,6 +224,56 @@ sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_b
   丢失包数
 - `result_path`
   目的节点写出的统计结果文件路径
+
+### 3. 12 点复杂拓扑下的 1%-10% 丢包扫频
+
+这个脚本会对每个丢包率点独立完成一轮完整流程：
+
+- 重新构建 12 节点 Mininet-WiFi 拓扑
+- 在所有 `sta*-wlan0` 接口注入对应的 `tc netem loss`
+- 启动当前这套 OLSR 应用层协议
+- 自动解析当前 OLSR 路由表得到 `sta1 -> sta12` 的显式逐跳路径
+- 测量该路径下的吞吐量、`PDR`、`loss_rate`
+- 把每个 loss 点结果分别写成单独 JSON，并汇总为总表
+
+一键运行：
+
+```bash
+cd /home/admin/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_loss_sweep_12sta.py
+```
+
+如果你要修改测试强度，例如每个点发 1000 个包、每包 1000 字节、包间隔 1ms：
+
+```bash
+cd /home/admin/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_loss_sweep_12sta.py --bench-count 1000 --bench-payload-size 1000 --bench-interval-ms 1
+```
+
+如果某个 loss 点失败但你仍然希望整轮继续跑完，可以加：
+
+```bash
+cd /home/admin/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_loss_sweep_12sta.py --continue-on-error
+```
+
+汇总结果文件：
+
+- `logs/loss_sweep_12sta/summary.json`
+- `logs/loss_sweep_12sta/summary.csv`
+
+`summary.csv` 里会直接给出这些字段，便于画图：
+
+- `loss_percent`
+- `path`
+- `startup_route_convergence_sec`
+- `route_setup_sec`
+- `goodput_mbps`
+- `loss_rate`
+- `pdr`
+- `sent_packets`
+- `received_packets`
+- `lost_packets`
 
 ## 资源占用查看
 
