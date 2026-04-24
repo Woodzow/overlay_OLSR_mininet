@@ -21,9 +21,9 @@
 12: 8, 9, 11
 ```
 
-拓扑配置文件：`/home/admin/overlay_OLSR_mininet/configs/mininet_wifi_complex_12sta/topology.json`
+拓扑配置文件：`/home/woodzow/overlay_OLSR_mininet/configs/mininet_wifi_complex_12sta/topology.json`
 
-主测试脚本：`/home/admin/overlay_OLSR_mininet/tools/mininet_wifi_complex_12sta.py`
+主测试脚本：`/home/woodzow/overlay_OLSR_mininet/tools/mininet_wifi_complex_12sta.py`
 
 ## 新增组件
 
@@ -32,49 +32,49 @@
 - `src/video_forwarder.py`
   独立于协议本身的视频/文件逐跳转发程序。它不嵌入协议，只查询 OLSR 当前路由表得到下一跳后转发。
 - `src/overlay_bench.py`
-  用于测试首次路由收敛时间、吞吐量、丢包率，也保留了时延测试能力。
+  用于一键测试首次路由收敛时间、端到端时延、吞吐量、丢包率。
 - `src/resource_bench.py`
   查看 OLSR、视频转发、overlay bench 的 CPU/内存占用。
 
 ## 运行 Mininet-WiFi 12 节点拓扑
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --cli --skip-file-transfer
 ```
 
 自动执行一次视频文件传输：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --video-file data.mp4 --cli
 ```
 
-自动执行一次路由收敛与吞吐量/丢包率测试：
+自动执行一次路由收敛、端到端时延与吞吐量/丢包率测试：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer --cli
 ```
 
 注入链路丢包，例如 5%：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer --link-loss 5
 ```
 
 一键扫描底层 `tc` 丢包率 1%-10%，统计 `sta1 -> sta12` 的吞吐量和端到端丢包率变化：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_loss_sweep_12sta.py
 ```
 
 结果会写到：
 
-- `/home/admin/overlay_OLSR_mininet/logs/loss_sweep_12sta/summary.json`
-- `/home/admin/overlay_OLSR_mininet/logs/loss_sweep_12sta/summary.csv`
+- `/home/woodzow/overlay_OLSR_mininet/logs/loss_sweep_12sta/summary.json`
+- `/home/woodzow/overlay_OLSR_mininet/logs/loss_sweep_12sta/summary.csv`
 
 ## Mininet-WiFi CLI 常用测试命令
 
@@ -105,117 +105,80 @@ sta7 python3 -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM
 先在除源节点外的中继/接收节点启动 `video_forwarder.py`。例如从 `sta1` 发到 `sta12`：
 
 ```bash
-sta2 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.2 --data-port 6200 &
-sta3 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.3 --data-port 6200 &
-sta4 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.4 --data-port 6200 &
-sta5 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.5 --data-port 6200 &
-sta6 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.6 --data-port 6200 &
-sta7 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.7 --data-port 6200 &
-sta8 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.8 --data-port 6200 &
-sta9 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.9 --data-port 6200 &
-sta10 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.10 --data-port 6200 &
-sta11 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.11 --data-port 6200 &
-sta12 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.12 --data-port 6200 --output-dir logs/received_videos &
+sta2 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.2 --data-port 6200 &
+sta3 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.3 --data-port 6200 &
+sta4 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.4 --data-port 6200 &
+sta5 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.5 --data-port 6200 &
+sta6 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.6 --data-port 6200 &
+sta7 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.7 --data-port 6200 &
+sta8 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.8 --data-port 6200 &
+sta9 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.9 --data-port 6200 &
+sta10 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.10 --data-port 6200 &
+sta11 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.11 --data-port 6200 &
+sta12 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.12 --data-port 6200 --output-dir logs/received_videos &
 ```
 
 源节点发送：
 
 ```bash
-sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.1 --data-port 6200 --send-file data.mp4 --dest-ip 10.0.0.12 --exit-after-send
+sta1 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/video_forwarder.py --node-ip 10.0.0.1 --data-port 6200 --send-file data.mp4 --dest-ip 10.0.0.12 --exit-after-send
 ```
 
 ## 路由性能测试命令
 
-### 1. 首次路由收敛时间
+推荐直接使用一键性能测试命令：
 
-这里的“首次路由收敛时间”定义为：
+```bash
+cd /home/woodzow/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer
+```
 
-- 从对应 OLSR 节点进程启动开始计时
-- 到该节点第一次得到目标路由为止
+这条命令会自动完成完整流程：
 
-`overlay_bench.py route` 会同时给出两个字段：
+- 清理旧的 `overlay_bench.py daemon`
+- 清理旧结果文件
+- 在除源节点外的 relay/destination 节点自动启动 benchmark daemon
+- 从 OLSR 路由表解析一条确定的 hop-by-hop overlay 路径
+- 测试首次路由收敛时间
+- 测试端到端 RTT、估算单向时延、时延丢包率
+- 测试吞吐量、PDR、丢包率
+- 打印各项 JSON 结果和吞吐量结果文件路径
+
+默认测试路径是 `sta1 -> sta12`。如需调整测试强度，可以直接在同一行命令后追加参数：
+
+```bash
+cd /home/woodzow/overlay_OLSR_mininet
+sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer --bench-latency-count 50 --bench-count 1000 --bench-payload-size 1000 --bench-interval-ms 1
+```
+
+首次路由收敛时间字段：
 
 - `startup_route_convergence_sec`
   从协议节点启动到该路由首次建立成功的时间
 - `route_setup_sec`
-  从你执行 benchmark 命令开始，到它查到路由的时间，仅作辅助值
+  从 benchmark 命令开始，到它查到路由的时间，仅作辅助值
 
-命令如下：
+端到端时延字段：
 
-```bash
-sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py route --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --json
-```
+- `rtt_min_ms`
+  最小 RTT
+- `rtt_avg_ms`
+  平均 RTT
+- `rtt_p95_ms`
+  P95 RTT
+- `rtt_max_ms`
+  最大 RTT
+- `one_way_estimated_ms`
+  按 RTT/2 估算的单向时延
+- `loss_rate`
+  时延探测包丢包率
 
-一键自动跑：
-
-```bash
-cd /home/admin/overlay_OLSR_mininet
-sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer
-```
-
-### 2. 吞吐量与丢包率
-
-现在的吞吐量/丢包率测量采用“单向统计”方式：
-
-- 源节点发送测试流量和结束报文
-- 目的节点在本地统计收到的包数、字节数、重复包数
-- 目的节点把统计结果写入 `logs/overlay_bench_results/`
-- 源节点轮询该结果文件并给出最终 JSON 结果
-
-并且自动化脚本现在会先从各节点的 OLSR 路由表解析出一条确定的 hop-by-hop 路径，再按这条显式路径转发 benchmark 报文，而不是在每个中继临时重新查下一跳。这样比旧版稳定很多。
-
-推荐优先使用一键脚本：
-
-```bash
-cd /home/admin/overlay_OLSR_mininet
-sudo python3 tools/mininet_wifi_complex_12sta.py --run-bench --skip-file-transfer
-```
-
-它会自动：
-
-- 清理旧的 `overlay_bench.py daemon`
-- 清理旧结果文件
-- 重启 relay/destination daemon
-- 解析一条显式 overlay 路径
-- 打印吞吐量 JSON 结果和结果文件路径
-
-如果你要手工测试，先清掉旧的 daemon：
-
-```bash
-pkill -f "overlay_bench.py"
-```
-
-然后在除源节点外的其它节点启动 benchmark daemon：
-
-```bash
-sta2 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.2 --data-port 6300 &
-sta3 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.3 --data-port 6300 &
-sta4 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.4 --data-port 6300 &
-sta5 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.5 --data-port 6300 &
-sta6 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.6 --data-port 6300 &
-sta7 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.7 --data-port 6300 &
-sta8 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.8 --data-port 6300 &
-sta9 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.9 --data-port 6300 &
-sta10 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.10 --data-port 6300 &
-sta11 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.11 --data-port 6300 &
-sta12 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py daemon --node-ip 10.0.0.12 --data-port 6300 &
-```
-
-源节点执行吞吐量/丢包率测试时，建议带一条显式路径。  
-例如如果当前解析出的路径是 `10.0.0.1 -> 10.0.0.4 -> 10.0.0.8 -> 10.0.0.12`，则命令为：
-
-```bash
-sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_bench.py throughput --node-ip 10.0.0.1 --dest-ip 10.0.0.12 --data-port 6300 --count 300 --payload-size 512 --interval-ms 2 --report-timeout-sec 30 --path 10.0.0.1,10.0.0.4,10.0.0.8,10.0.0.12 --json
-```
-
-建议先从较保守参数开始，例如上面的 `300` 包、`512` 字节、`2ms` 间隔，跑通后再逐步增大。
-
-结果中的关键字段：
+吞吐量与丢包率字段：
 
 - `goodput_mbps`
   实测吞吐量
 - `loss_rate`
-  丢包率
+  吞吐量测试的丢包率
 - `pdr`
   包投递率
 - `received_packets`
@@ -239,21 +202,21 @@ sta1 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/overlay_b
 一键运行：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_loss_sweep_12sta.py
 ```
 
 如果你要修改测试强度，例如每个点发 1000 个包、每包 1000 字节、包间隔 1ms：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_loss_sweep_12sta.py --bench-count 1000 --bench-payload-size 1000 --bench-interval-ms 1
 ```
 
 如果某个 loss 点失败但你仍然希望整轮继续跑完，可以加：
 
 ```bash
-cd /home/admin/overlay_OLSR_mininet
+cd /home/woodzow/overlay_OLSR_mininet
 sudo python3 tools/mininet_wifi_loss_sweep_12sta.py --continue-on-error
 ```
 
@@ -278,5 +241,5 @@ sudo python3 tools/mininet_wifi_loss_sweep_12sta.py --continue-on-error
 ## 资源占用查看
 
 ```bash
-sta7 cd /home/admin/overlay_OLSR_mininet && PYTHONPATH=src python3 src/resource_bench.py
+sta7 cd /home/woodzow/overlay_OLSR_mininet && PYTHONPATH=src python3 src/resource_bench.py
 ```

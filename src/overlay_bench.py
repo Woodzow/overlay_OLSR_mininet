@@ -307,6 +307,12 @@ class OverlayBenchNode:
             "send_ts_ns": int(packet["send_ts_ns"]),
             "payload_size": int(packet.get("payload_size", 0)),
         }
+        raw_path = packet.get("path")
+        if isinstance(raw_path, list) and len(raw_path) >= 2:
+            reply_path = [str(item) for item in reversed(raw_path)]
+            if reply_path[0] == self.node_ip and reply_path[-1] == str(packet["src_ip"]):
+                reply["path"] = reply_path
+                reply["path_index"] = 0
         self.send_overlay(reply)
 
     def handle_ping_reply(self, packet: dict[str, Any]) -> None:
@@ -516,6 +522,19 @@ def build_node(args: argparse.Namespace) -> OverlayBenchNode:
     )
 
 
+def parse_explicit_path(args: argparse.Namespace) -> list[str] | None:
+    if not args.path:
+        return None
+    explicit_path = [item.strip() for item in str(args.path).split(",") if item.strip()]
+    if len(explicit_path) < 2:
+        raise ValueError("--path must contain at least source and destination IPs")
+    if explicit_path[0] != args.node_ip:
+        raise ValueError(f"--path must start with source ip {args.node_ip}")
+    if explicit_path[-1] != args.dest_ip:
+        raise ValueError(f"--path must end with destination ip {args.dest_ip}")
+    return explicit_path
+
+
 def run_route_command(args: argparse.Namespace) -> int:
     args.bind_port = 0
     node = build_node(args)
@@ -548,6 +567,7 @@ def run_latency_command(args: argparse.Namespace) -> int:
     try:
         listener = node.start_background()
         route, route_setup_sec = node.establish_route(args.dest_ip)
+        explicit_path = parse_explicit_path(args)
         payload_text = "x" * int(args.payload_size)
         rtts_ms: list[float] = []
         lost = 0
@@ -565,6 +585,9 @@ def run_latency_command(args: argparse.Namespace) -> int:
                 "payload_size": int(args.payload_size),
                 "payload": payload_text,
             }
+            if explicit_path is not None:
+                packet["path"] = list(explicit_path)
+                packet["path_index"] = 0
             start_ns = time.perf_counter_ns()
             try:
                 node.send_overlay(packet)
@@ -589,6 +612,7 @@ def run_latency_command(args: argparse.Namespace) -> int:
             "route_setup_sec": round(route_setup_sec, 6),
             "next_hop_ip": route.next_hop_ip,
             "hop_count": route.hop_count,
+            "path": explicit_path,
             "sent": sent,
             "received": received,
             "lost": lost,
@@ -614,15 +638,7 @@ def run_throughput_command(args: argparse.Namespace) -> int:
     node = build_node(args)
     try:
         route, route_setup_sec = node.establish_route(args.dest_ip)
-        explicit_path = None
-        if args.path:
-            explicit_path = [item.strip() for item in str(args.path).split(",") if item.strip()]
-            if len(explicit_path) < 2:
-                raise ValueError("--path must contain at least source and destination IPs")
-            if explicit_path[0] != args.node_ip:
-                raise ValueError(f"--path must start with source ip {args.node_ip}")
-            if explicit_path[-1] != args.dest_ip:
-                raise ValueError(f"--path must end with destination ip {args.dest_ip}")
+        explicit_path = parse_explicit_path(args)
         payload_text = "x" * int(args.payload_size)
         session_id = uuid.uuid4().hex
         result_path = session_result_path(args.dest_ip, session_id)

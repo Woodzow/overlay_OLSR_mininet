@@ -40,10 +40,14 @@ def parse_args(topology: dict) -> argparse.Namespace:
     parser.add_argument("--video-chunk-size", type=int, default=900, help="Raw bytes per file chunk before base64 in video_forwarder.py.")
     parser.add_argument("--skip-file-transfer", action="store_true", help="Only build topology and OLSR processes, do not run the file transfer demo.")
     parser.add_argument("--link-loss", type=float, default=0.0, help="Apply tc netem packet loss percentage on each sta wlan interface, e.g. 5 for 5%%.")
-    parser.add_argument("--run-bench", action="store_true", help="Run automated route-convergence and throughput/loss benchmarks.")
+    parser.add_argument("--run-bench", action="store_true", help="Run automated route-convergence, latency, and throughput/loss benchmarks.")
     parser.add_argument("--bench-src", default=topology["video_source"], help="Source station name used by the benchmark sender.")
     parser.add_argument("--bench-dest-ip", default=topology["video_dest_ip"], help="Destination IP used by the benchmark sender.")
     parser.add_argument("--bench-data-port", type=int, default=BENCH_DATA_PORT, help="UDP data port used by overlay_bench.py.")
+    parser.add_argument("--bench-latency-count", type=int, default=20, help="Number of probes to send in latency benchmark.")
+    parser.add_argument("--bench-latency-payload-size", type=int, default=64, help="Payload size in bytes per latency probe.")
+    parser.add_argument("--bench-latency-interval-ms", type=float, default=100.0, help="Inter-probe delay in milliseconds for latency benchmark.")
+    parser.add_argument("--bench-latency-reply-timeout-sec", type=float, default=3.0, help="Per-probe reply timeout for latency benchmark.")
     parser.add_argument("--bench-count", type=int, default=1000, help="Number of packets to send in throughput benchmark.")
     parser.add_argument("--bench-payload-size", type=int, default=1000, help="Payload size in bytes per benchmark packet.")
     parser.add_argument("--bench-interval-ms", type=float, default=0.0, help="Inter-packet delay in milliseconds for throughput benchmark.")
@@ -327,18 +331,14 @@ def automated_file_transfer(
     info("*** One-click file transfer succeeded\n")
 
 
-def run_overlay_bench(
+def prepare_overlay_bench(
     repo_root: Path,
     stations,
     topology: dict,
     source_name: str,
     dest_ip: str,
     data_port: int,
-    count: int,
-    payload_size: int,
-    interval_ms: float,
-    report_timeout_sec: float,
-) -> tuple[dict, dict, list[str]]:
+) -> tuple[dict, list[str]]:
     stations_by_name = {node.name: node for node in stations}
     source_node = stations_by_name[source_name]
 
@@ -363,6 +363,24 @@ def run_overlay_bench(
     route_result = json.loads(run_cmd(source_node, route_cmd))
 
     resolved_path = resolve_overlay_path(stations_by_name, topology, source_name, dest_ip)
+    return route_result, resolved_path
+
+
+def run_overlay_throughput_bench(
+    repo_root: Path,
+    stations,
+    topology: dict,
+    source_name: str,
+    dest_ip: str,
+    data_port: int,
+    count: int,
+    payload_size: int,
+    interval_ms: float,
+    report_timeout_sec: float,
+    resolved_path: list[str],
+) -> dict:
+    stations_by_name = {node.name: node for node in stations}
+    source_node = stations_by_name[source_name]
 
     throughput_cmd = (
         f"cd {shlex.quote(str(repo_root))} && "
@@ -374,11 +392,10 @@ def run_overlay_bench(
         f"--path {shlex.quote(','.join(resolved_path))} "
         f"--quiet --json"
     )
-    throughput_result = json.loads(run_cmd(source_node, throughput_cmd))
-    return route_result, throughput_result, resolved_path
+    return json.loads(run_cmd(source_node, throughput_cmd))
 
 
-def automated_bench(
+def run_overlay_bench(
     repo_root: Path,
     stations,
     topology: dict,
@@ -389,8 +406,16 @@ def automated_bench(
     payload_size: int,
     interval_ms: float,
     report_timeout_sec: float,
-) -> None:
-    route_result, throughput_result, resolved_path = run_overlay_bench(
+) -> tuple[dict, dict, list[str]]:
+    route_result, resolved_path = prepare_overlay_bench(
+        repo_root=repo_root,
+        stations=stations,
+        topology=topology,
+        source_name=source_name,
+        dest_ip=dest_ip,
+        data_port=data_port,
+    )
+    throughput_result = run_overlay_throughput_bench(
         repo_root=repo_root,
         stations=stations,
         topology=topology,
@@ -401,11 +426,95 @@ def automated_bench(
         payload_size=payload_size,
         interval_ms=interval_ms,
         report_timeout_sec=report_timeout_sec,
+        resolved_path=resolved_path,
+    )
+    return route_result, throughput_result, resolved_path
+
+
+def run_overlay_latency_bench(
+    repo_root: Path,
+    stations,
+    topology: dict,
+    source_name: str,
+    dest_ip: str,
+    data_port: int,
+    count: int,
+    payload_size: int,
+    interval_ms: float,
+    reply_timeout_sec: float,
+    resolved_path: list[str],
+) -> dict:
+    stations_by_name = {node.name: node for node in stations}
+    source_node = stations_by_name[source_name]
+    latency_cmd = (
+        f"cd {shlex.quote(str(repo_root))} && "
+        f"PYTHONPATH={shlex.quote(str(repo_root / 'src'))} "
+        f"python3 src/overlay_bench.py latency --node-ip {source_ip_of(topology, source_name)} "
+        f"--dest-ip {dest_ip} --data-port {int(data_port)} --count {int(count)} "
+        f"--payload-size {int(payload_size)} --interval-ms {float(interval_ms)} "
+        f"--reply-timeout-sec {float(reply_timeout_sec)} "
+        f"--path {shlex.quote(','.join(resolved_path))} "
+        f"--quiet --json"
+    )
+    return json.loads(run_cmd(source_node, latency_cmd))
+
+
+def automated_bench(
+    repo_root: Path,
+    stations,
+    topology: dict,
+    source_name: str,
+    dest_ip: str,
+    data_port: int,
+    latency_count: int,
+    latency_payload_size: int,
+    latency_interval_ms: float,
+    latency_reply_timeout_sec: float,
+    count: int,
+    payload_size: int,
+    interval_ms: float,
+    report_timeout_sec: float,
+) -> None:
+    route_result, resolved_path = prepare_overlay_bench(
+        repo_root=repo_root,
+        stations=stations,
+        topology=topology,
+        source_name=source_name,
+        dest_ip=dest_ip,
+        data_port=data_port,
+    )
+    latency_result = run_overlay_latency_bench(
+        repo_root=repo_root,
+        stations=stations,
+        topology=topology,
+        source_name=source_name,
+        dest_ip=dest_ip,
+        data_port=data_port,
+        count=latency_count,
+        payload_size=latency_payload_size,
+        interval_ms=latency_interval_ms,
+        reply_timeout_sec=latency_reply_timeout_sec,
+        resolved_path=resolved_path,
+    )
+    throughput_result = run_overlay_throughput_bench(
+        repo_root=repo_root,
+        stations=stations,
+        topology=topology,
+        source_name=source_name,
+        dest_ip=dest_ip,
+        data_port=data_port,
+        count=count,
+        payload_size=payload_size,
+        interval_ms=interval_ms,
+        report_timeout_sec=report_timeout_sec,
+        resolved_path=resolved_path,
     )
     info("\n=== route convergence benchmark ===\n")
     info(json.dumps(route_result, ensure_ascii=False, indent=2) + "\n")
     info("\n=== resolved overlay path ===\n")
     info(" -> ".join(resolved_path) + "\n")
+    info("\n=== latency benchmark ===\n")
+    info(json.dumps(latency_result, ensure_ascii=False, indent=2) + "\n")
     info("\n=== throughput/loss benchmark ===\n")
     info(json.dumps(throughput_result, ensure_ascii=False, indent=2) + "\n")
     result_path = throughput_result.get("result_path")
@@ -453,6 +562,10 @@ def main() -> int:
                 source_name=args.bench_src,
                 dest_ip=args.bench_dest_ip,
                 data_port=args.bench_data_port,
+                latency_count=args.bench_latency_count,
+                latency_payload_size=args.bench_latency_payload_size,
+                latency_interval_ms=args.bench_latency_interval_ms,
+                latency_reply_timeout_sec=args.bench_latency_reply_timeout_sec,
                 count=args.bench_count,
                 payload_size=args.bench_payload_size,
                 interval_ms=args.bench_interval_ms,
