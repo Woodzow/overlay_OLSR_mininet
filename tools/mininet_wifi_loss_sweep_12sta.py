@@ -47,8 +47,8 @@ def parse_args(topology: dict) -> argparse.Namespace:
         default=1.0,
         help="Wait after starting all OLSR processes before running the benchmark.",
     )
-    parser.add_argument("--loss-start", type=int, default=0, help="Start loss percent for the sweep.")
-    parser.add_argument("--loss-end", type=int, default=5, help="End loss percent for the sweep.")
+    parser.add_argument("--loss-start", type=int, default=1, help="Start loss percent for the sweep.")
+    parser.add_argument("--loss-end", type=int, default=10, help="End loss percent for the sweep.")
     parser.add_argument("--loss-step", type=int, default=1, help="Loss percent increment for the sweep.")
     parser.add_argument(
         "--output-dir",
@@ -134,37 +134,6 @@ def write_summary_files(output_dir: Path, summary: dict) -> None:
                     "error": item.get("error", ""),
                 }
             )
-
-
-def format_table_value(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float):
-        text = f"{value:.3f}"
-        return text.rstrip("0").rstrip(".") if "." in text else text
-    return str(value)
-
-
-def print_final_result_table(results: list[dict]) -> None:
-    columns = [
-        ("tc_loss%", "loss_percent"),
-        ("hop", "hop_count"),
-        ("loss_rate", "loss_rate"),
-        ("goodput_mbps", "goodput_mbps"),
-    ]
-    rows = [
-        [format_table_value(item.get(key)) for _title, key in columns]
-        for item in results
-    ]
-    widths = [
-        max(len(title), *(len(row[index]) for row in rows)) if rows else len(title)
-        for index, (title, _key) in enumerate(columns)
-    ]
-
-    info("\n=== final loss sweep result ===\n")
-    info("  ".join(title.ljust(widths[index]) for index, (title, _key) in enumerate(columns)) + "\n")
-    for row in rows:
-        info("  ".join(row[index].rjust(widths[index]) for index in range(len(columns))) + "\n")
 
 
 def run_single_loss_case(
@@ -283,7 +252,6 @@ def main() -> int:
         write_summary_files(output_dir, summary)
 
     info("\n=== loss sweep finished ===\n")
-    print_final_result_table(summary["results"])
     info(f"summary_json={output_dir / 'summary.json'}\n")
     info(f"summary_csv={output_dir / 'summary.csv'}\n")
     return 0
