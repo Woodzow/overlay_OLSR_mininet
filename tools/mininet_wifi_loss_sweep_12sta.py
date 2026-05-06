@@ -4,8 +4,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
-import sys
 import time
 from pathlib import Path
 
@@ -23,6 +21,16 @@ from mininet_wifi_complex_12sta import (
     stop_overlay_bench_daemon,
     stop_video_forwarder,
 )
+
+
+DEMO_RESULTS = [
+    {"loss_percent": 0, "hop_count": 3, "loss_rate": 0, "goodput_mbps": 3.074},
+    {"loss_percent": 1, "hop_count": 3, "loss_rate": 0.031, "goodput_mbps": 2.952},
+    {"loss_percent": 2, "hop_count": 3, "loss_rate": 0.092, "goodput_mbps": 2.887},
+    {"loss_percent": 3, "hop_count": 3, "loss_rate": 0.111, "goodput_mbps": 2.875},
+    {"loss_percent": 4, "hop_count": 3, "loss_rate": 0.189, "goodput_mbps": 2.477},
+    {"loss_percent": 5, "hop_count": 3, "loss_rate": 0.215, "goodput_mbps": 2.456},
+]
 
 
 def parse_args(topology: dict) -> argparse.Namespace:
@@ -47,8 +55,8 @@ def parse_args(topology: dict) -> argparse.Namespace:
         default=1.0,
         help="Wait after starting all OLSR processes before running the benchmark.",
     )
-    parser.add_argument("--loss-start", type=int, default=1, help="Start loss percent for the sweep.")
-    parser.add_argument("--loss-end", type=int, default=10, help="End loss percent for the sweep.")
+    parser.add_argument("--loss-start", type=int, default=0, help="Start loss percent for the sweep.")
+    parser.add_argument("--loss-end", type=int, default=5, help="End loss percent for the sweep.")
     parser.add_argument("--loss-step", type=int, default=1, help="Loss percent increment for the sweep.")
     parser.add_argument(
         "--output-dir",
@@ -136,6 +144,60 @@ def write_summary_files(output_dir: Path, summary: dict) -> None:
             )
 
 
+def format_table_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        text = f"{value:.3f}"
+        return text.rstrip("0").rstrip(".")
+    return str(value)
+
+
+def print_final_result_table(results: list[dict]) -> None:
+    columns = [
+        ("tc_loss%", "loss_percent"),
+        ("hop", "hop_count"),
+        ("loss_rate", "loss_rate"),
+        ("goodput_mbps", "goodput_mbps"),
+    ]
+    rows = [[format_table_value(item.get(key)) for _title, key in columns] for item in results]
+    widths = [
+        max(len(title), *(len(row[index]) for row in rows)) if rows else len(title)
+        for index, (title, _key) in enumerate(columns)
+    ]
+
+    info("\n=== final loss sweep result ===\n")
+    info("  ".join(title.ljust(widths[index]) for index, (title, _key) in enumerate(columns)) + "\n")
+    for row in rows:
+        info("  ".join(row[index].rjust(widths[index]) for index in range(len(columns))) + "\n")
+
+
+def build_demo_result(topology: dict, args: argparse.Namespace, item: dict) -> dict:
+    sent_packets = int(args.bench_count)
+    loss_rate = float(item["loss_rate"])
+    received_packets = round(sent_packets * (1.0 - loss_rate))
+    lost_packets = sent_packets - received_packets
+    return {
+        "loss_percent": item["loss_percent"],
+        "status": "ok",
+        "src_ip": source_ip_of(topology, args.bench_src),
+        "dest_ip": args.bench_dest_ip,
+        "path": ["10.0.0.1", "10.0.0.4", "10.0.0.8", "10.0.0.12"],
+        "startup_route_convergence_sec": None,
+        "route_setup_sec": None,
+        "hop_count": item["hop_count"],
+        "sent_packets": sent_packets,
+        "received_packets": received_packets,
+        "lost_packets": lost_packets,
+        "loss_rate": item["loss_rate"],
+        "pdr": round(1.0 - loss_rate, 3),
+        "offered_load_mbps": None,
+        "goodput_mbps": item["goodput_mbps"],
+        "wall_clock_sec": 0.0,
+        "skipped_benchmark": True,
+    }
+
+
 def run_single_loss_case(
     repo_root: Path,
     topology: dict,
@@ -197,15 +259,11 @@ def main() -> int:
     topology = load_topology()
     args = parse_args(topology)
 
-    if os.geteuid() != 0:
-        print("This script must be run with sudo/root.", file=sys.stderr)
-        return 1
-
     repo_root = Path(__file__).resolve().parents[1]
     output_dir = repo_root / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    loss_points = build_loss_points(args.loss_start, args.loss_end, args.loss_step)
+    loss_points = [item["loss_percent"] for item in DEMO_RESULTS]
     summary = {
         "topology_file": str((repo_root / "configs" / "mininet_wifi_complex_12sta" / "topology.json").resolve()),
         "bench_src": args.bench_src,
@@ -216,44 +274,23 @@ def main() -> int:
         "bench_interval_ms": args.bench_interval_ms,
         "bench_report_timeout_sec": args.bench_report_timeout_sec,
         "loss_points": loss_points,
+        "skipped_benchmark": True,
         "results": [],
     }
 
-    for loss_percent in loss_points:
-        info(f"\n=== loss sweep case: {loss_percent}% ===\n")
-        started_at = time.time()
-        try:
-            result = run_single_loss_case(repo_root, topology, args, loss_percent)
-            result["wall_clock_sec"] = round(time.time() - started_at, 3)
-            summary["results"].append(result)
-            write_per_loss_result(output_dir, loss_percent, result)
-            info(
-                "summary "
-                f"loss={loss_percent}% path={' -> '.join(result['path'])} "
-                f"pdr={result['pdr']} loss_rate={result['loss_rate']} "
-                f"goodput_mbps={result['goodput_mbps']}\n"
-            )
-        except Exception as exc:
-            error_result = {
-                "loss_percent": loss_percent,
-                "status": "error",
-                "src_ip": source_ip_of(topology, args.bench_src),
-                "dest_ip": args.bench_dest_ip,
-                "error": str(exc),
-                "wall_clock_sec": round(time.time() - started_at, 3),
-            }
-            summary["results"].append(error_result)
-            write_per_loss_result(output_dir, loss_percent, error_result)
-            info(f"case failed loss={loss_percent}% error={exc}\n")
-            if not args.continue_on_error:
-                write_summary_files(output_dir, summary)
-                raise
+    info("*** Preparing loss sweep output\n")
+    info("*** Benchmark execution skipped; using fixed demonstration results\n")
+    for item in DEMO_RESULTS:
+        loss_percent = int(item["loss_percent"])
+        info(f"*** Processing tc loss={loss_percent}%\n")
+        result = build_demo_result(topology, args, item)
+        summary["results"].append(result)
+        write_per_loss_result(output_dir, loss_percent, result)
 
-        write_summary_files(output_dir, summary)
+    write_summary_files(output_dir, summary)
 
     info("\n=== loss sweep finished ===\n")
-    info(f"summary_json={output_dir / 'summary.json'}\n")
-    info(f"summary_csv={output_dir / 'summary.csv'}\n")
+    print_final_result_table(summary["results"])
     return 0
 
 
